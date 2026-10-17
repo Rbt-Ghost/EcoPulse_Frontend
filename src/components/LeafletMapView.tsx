@@ -187,7 +187,8 @@ export default function LeafletMapView(props: MapViewProps) {
       )}
       <LocateButton position={props.userPosition} hasGps={props.hasGps} />
 
-      {data && layers.pollution && <PollutionGrid data={data} />}
+      {/* Fără senzori nu desenăm nimic: un cache gol nu înseamnă aer curat. */}
+      {data && layers.pollution && data.sensors.length > 0 && <PollutionGrid data={data} />}
 
       {data && layers.construction &&
         data.constructionZones.map((z) => {

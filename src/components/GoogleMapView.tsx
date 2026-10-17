@@ -233,7 +233,8 @@ function GoogleMapInner(props: MapViewProps) {
         }}
         onClick={onMapClick}
       >
-        {data && layers.pollution && <PollutionOverlay sensors={data.sensors} />}
+        {/* Fără senzori nu desenăm nimic: un cache gol nu înseamnă aer curat. */}
+        {data && layers.pollution && data.sensors.length > 0 && <PollutionOverlay sensors={data.sensors} />}
 
         {data && layers.construction &&
           data.constructionZones.map((z) => {

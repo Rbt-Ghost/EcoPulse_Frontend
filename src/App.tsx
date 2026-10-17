@@ -5,8 +5,9 @@ import { MapOverlay } from './components/MapOverlay'
 import { GOOGLE_MAPS_KEY, type MapFocus } from './components/mapTypes'
 import { NavRail, type Tab } from './components/NavRail'
 import { RoutePlanner } from './components/RoutePlanner'
+import { IASI_CENTER } from './data/iasi'
 import { useGeolocation } from './hooks/useGeolocation'
-import { api, API_URL, ApiError, type ReportPlace } from './services/api'
+import { api, API_URL, ApiError, MAX_REPORT_ACCURACY, type ReportPlace } from './services/api'
 import { reverseGeocode } from './services/geocoding'
 import { computeRoutes, openInGoogleMaps } from './services/routing'
 import type {
@@ -143,12 +144,15 @@ export default function App() {
     requestRoutes(to, from, profile)
   }
 
-  const useMyLocation = () => {
-    if (geo.status !== 'gps') {
-      geo.locate()
-      notify('Nu avem acces la GPS – folosim centrul Iașului.', 'error')
+  const useMyLocation = async () => {
+    // Așteptăm o poziție GPS reală (și când localizarea e încă în curs), nu valoarea implicită.
+    const fix = await geo.freshFix()
+    if (fix) {
+      updateFrom({ lat: fix.lat, lng: fix.lng, label: 'Locația mea' })
+      return
     }
-    updateFrom({ ...geo.position, label: geo.status === 'gps' ? 'Locația mea' : 'Centrul Iașului' })
+    notify('Nu avem acces la GPS – folosim centrul Iașului.', 'error')
+    updateFrom({ ...IASI_CENTER, label: 'Centrul Iașului' })
   }
 
   const pickPoint = useCallback(
@@ -223,7 +227,7 @@ export default function App() {
       setLayers((l) => ({ ...l, issues: true }))
       if (window.innerWidth >= 860) setFocus({ lat: issue.lat, lng: issue.lng, zoom: 15, key: Date.now() })
     } catch (e) {
-      const detail = e instanceof ApiError && e.status === 422 ? ` ${e.message}` : ''
+      const detail = e instanceof ApiError && (e.status === 422 || e.status === 429) ? ` ${e.message}` : ''
       patchMessage(pendingId, {
         pending: false,
         text: `Nu am putut adăuga problema pe hartă.${detail} Încearcă din nou în câteva momente.`,
@@ -246,15 +250,17 @@ export default function App() {
     setSending(true)
     const fix = await geo.freshFix()
     setSending(false)
-    if (fix) {
+    if (fix && fix.accuracy <= MAX_REPORT_ACCURACY) {
       await publish(text, fix, pendingId)
       return
     }
-    // Fără GPS: utilizatorul alege locul pe hartă.
+    // Fără GPS (sau cu o poziție prea imprecisă): utilizatorul alege locul pe hartă.
     patchMessage(pendingId, {
       pending: false,
       pickLocation: true,
-      text: 'Nu am acces la locația ta. Apasă pe hartă locul unde se află problema și confirmă, iar eu o adaug imediat.',
+      text: fix
+        ? `Locația ta e prea imprecisă (±${Math.round(fix.accuracy)} m). Apasă pe hartă locul unde se află problema și confirmă, iar eu o adaug imediat.`
+        : 'Nu am acces la locația ta. Apasă pe hartă locul unde se află problema și confirmă, iar eu o adaug imediat.',
     })
     setAwaitingPlace({ text, messageId: pendingId })
     setPicking(true)

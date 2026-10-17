@@ -58,7 +58,7 @@ function Insight({ routes }: { routes: RouteResult }) {
       </div>
     )
   }
-  const saved = Math.round((1 - cleanest.exposure / fastest.exposure) * 100)
+  const saved = fastest.exposure > 0 ? Math.round((1 - cleanest.exposure / fastest.exposure) * 100) : 0
   const extra = Math.max(1, Math.round((cleanest.duration - fastest.duration) / 60))
   const avoided = fastest.obstacles - cleanest.obstacles
   return (

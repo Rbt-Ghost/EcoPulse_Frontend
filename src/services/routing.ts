@@ -9,7 +9,8 @@ import { aqiAt, haversine, perpendicularOffset, pointInPolygon } from '../utils/
 
 // Rutare: OSRM (routing.openstreetmap.de) generează trasee candidate, iar EcoPulse
 // le evaluează local după expunerea la poluare și obstacolele de pe hartă.
-// Când backend-ul va fi gata, `computeRoutes` poate fi înlocuit cu un apel la API.
+// Backend-ul are `POST /routes/alternatives`, dar acesta cere un server Valhalla
+// (`VALHALLA_BASE_URL`) și nu suportă profilul „mașină”, așa că nu este folosit încă.
 
 const OSRM: Record<TravelProfile, string> = {
   foot: 'https://routing.openstreetmap.de/routed-foot/route/v1/driving',
@@ -153,8 +154,9 @@ export async function computeRoutes(
 
   const fastest = minBy(candidates, (c) => c.duration)
   const cleanest = minBy(candidates, ecoCost)
-  const minDur = fastest.duration
-  const minEco = ecoCost(cleanest)
+  // Protecție la împărțirea la zero (trasee degenerate, fără segmente).
+  const minDur = fastest.duration || 1
+  const minEco = ecoCost(cleanest) || 1
   const balancedScore = (c: RouteCandidate) => 0.5 * (c.duration / minDur) + 0.5 * (ecoCost(c) / minEco)
 
   // Traseul echilibrat trebuie să fie un compromis real: mai curat decât cel rapid

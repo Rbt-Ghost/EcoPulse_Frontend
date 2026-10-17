@@ -26,7 +26,9 @@ export function IssuePopup({ issue, onAction }: Props) {
     }
   }, [issue.id, issue.resolveVotes])
 
-  const mine = feedback ? feedback.canResolve : issue.mine
+  const mine = feedback ? feedback.mine : issue.mine
+  // Autorul sau un administrator pot închide issue-ul direct.
+  const canResolve = feedback ? feedback.canResolve : issue.mine
   const voted = feedback?.myVote != null
   const votes = issue.resolveVotes
 
@@ -62,12 +64,13 @@ export function IssuePopup({ issue, onAction }: Props) {
         </div>
       )}
 
-      {mine ? (
+      {canResolve && (
         <button className="btn btn-danger btn-sm full" disabled={busy} onClick={() => run(() => onAction('resolve', issue))}>
           {busy ? <Loader2 size={15} className="spin" /> : <Trash2 size={15} />}
-          Problema s-a rezolvat – elimină
+          {mine ? 'Problema s-a rezolvat – elimină' : 'Închide raportarea (administrator)'}
         </button>
-      ) : (
+      )}
+      {!mine && (
         <button
           className="btn btn-primary btn-sm full"
           disabled={busy || voted || feedback?.canVote === false}

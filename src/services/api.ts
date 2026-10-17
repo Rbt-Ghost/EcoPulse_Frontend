@@ -18,16 +18,18 @@ import type {
  *   POST /auth/register, /auth/login              cont anonim per dispozitiv (JWT)
  *   GET  /reports                                 issues raportate de utilizatori
  *   GET  /reports/:id/feedback                    ce poate face utilizatorul curent
- *   POST /reports/:id/resolve                     autorul elimină issue-ul
+ *   POST /reports/:id/resolve                     autorul (sau un admin) elimină issue-ul
  *   POST /reports/:id/dispute                     alt utilizator confirmă că s-a rezolvat
- *   GET  /environment/observations                măsurători PM2.5 / PM10 / NO₂
- *   GET  /disruptions/features, /disruptions/planned   șantiere OSM și lucrări oficiale
- *   POST /reports/from-text                       chat-ul de raportare: text → issue rescris de LLM
+ *   GET  /environment/observations                măsurători PM2.5 / PM10 / NO₂ recente (pe categorii)
+ *   GET  /disruptions/features, /disruptions/planned   șantiere OSM și lucrări oficiale active
+ *   POST /reports/from-text                       chat-ul de raportare: text → issue (rescris de LLM dacă e configurat)
  */
 export const API_URL: string = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1').replace(/\/$/, '')
 
-/** Câte confirmări de la alți utilizatori sunt necesare ca un issue să dispară (RESOLVE_DISPUTES în backend). */
+/** Câte confirmări de la alți utilizatori sunt necesare ca un issue să dispară (RESOLVE_DISPUTES în backend, expus și în `GET /config`). */
 export const RESOLVE_THRESHOLD = 3
+/** Precizia GPS minimă acceptată de backend pentru o raportare (`accuracy_m` ≤ 1000). */
+export const MAX_REPORT_ACCURACY = 1000
 /** Raza zonei afectate de un issue, în metri. */
 export const ISSUE_RADIUS = 500
 
@@ -92,7 +94,10 @@ async function fail(res: Response): Promise<never> {
   let detail = ''
   try {
     const body = await res.json()
-    detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)
+    if (typeof body.detail === 'string') detail = body.detail
+    // Erorile de validare FastAPI sunt o listă de obiecte { loc, msg, type }.
+    else if (Array.isArray(body.detail)) detail = body.detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join('; ')
+    else if (body.detail) detail = JSON.stringify(body.detail)
   } catch {
     /* fără corp JSON */
   }
@@ -232,6 +237,7 @@ type Observation = {
   category: string
   parameter: string
   value: number | null
+  unit: string
   latitude: number
   longitude: number
   observed_at: string
@@ -266,8 +272,16 @@ function subIndex(parameter: string, value: number): number {
 }
 
 function toSensors(observations: Observation[]): PollutionSensor[] {
+  const now = Date.now()
   const measured = observations.filter(
-    (o) => o.value != null && o.parameter in BREAKPOINTS && o.category !== 'WEATHER_CONTEXT',
+    (o) =>
+      o.value != null &&
+      o.parameter in BREAKPOINTS &&
+      // Valorile fără conversie (ex. NO₂ în ppb) nu sunt comparabile cu pragurile în µg/m³.
+      o.unit === 'µg/m³' &&
+      o.category !== 'WEATHER_CONTEXT' &&
+      // Datele vechi (sincronizare oprită) nu descriu aerul de acum.
+      o.freshness === 'fresh',
   )
   // Senzorii la sol au prioritate; modelul CAMS doar dacă nu există măsurători.
   const ground = measured.filter((o) => o.category !== 'MODEL_FORECAST')
@@ -281,9 +295,12 @@ function toSensors(observations: Observation[]): PollutionSensor[] {
   }
 
   return [...groups.entries()].flatMap(([key, items]) => {
+    // Valoarea cea mai apropiată de momentul curent: ultima măsurătoare sau, pentru prognoza
+    // CAMS (orară, pe 3 zile), ora curentă – nu ultima oră din prognoză.
+    const distance = (o: Observation) => Math.abs(Date.parse(o.observed_at) - now)
     const latest: Record<string, Observation> = {}
     for (const o of items) {
-      if (!latest[o.parameter] || o.observed_at > latest[o.parameter].observed_at) latest[o.parameter] = o
+      if (!latest[o.parameter] || distance(o) < distance(latest[o.parameter])) latest[o.parameter] = o
     }
     const values = Object.values(latest)
     const aqi = Math.round(Math.max(...values.map((o) => subIndex(o.parameter, o.value!))))
@@ -314,8 +331,8 @@ type Feature = {
   id: string
   latitude: number
   longitude: number
-  geometry: { type: 'Point' | 'LineString'; coordinates: number[] | number[][] }
-  tags: Record<string, string>
+  geometry: { type: 'Point' | 'LineString'; coordinates: number[] | number[][] } | null
+  tags: Record<string, string> | null
   retrieved_at: string
 }
 
@@ -323,10 +340,10 @@ type PlannedWork = {
   id: string
   title: string
   description: string | null
-  latitude: number
-  longitude: number
-  starts_at: string
-  ends_at: string
+  latitude: number | null
+  longitude: number | null
+  starts_at: string | null
+  ends_at: string | null
   original_url: string
 }
 
@@ -345,11 +362,12 @@ function featureDescription(tags: Record<string, string>): string {
 function splitFeatures(features: Feature[]): Pick<MapData, 'hazards' | 'constructionZones'> {
   const hazards: InfrastructureHazard[] = []
   const constructionZones: ConstructionZone[] = []
-  for (const f of features) {
-    const line = f.geometry.type === 'LineString' ? (f.geometry.coordinates as number[][]) : null
+  for (const raw of features) {
+    const f = { ...raw, tags: raw.tags ?? {} }
+    const line = f.geometry?.type === 'LineString' ? (f.geometry.coordinates as number[][]) : null
     const closed =
       line && line.length >= 4 && line[0][0] === line.at(-1)![0] && line[0][1] === line.at(-1)![1]
-    if (closed && f.tags.highway !== 'construction') {
+    if (line && closed && f.tags.highway !== 'construction') {
       constructionZones.push({
         id: f.id,
         title: featureTitle(f.tags),
@@ -375,7 +393,7 @@ function splitFeatures(features: Feature[]): Pick<MapData, 'hazards' | 'construc
 }
 
 /** Lucrările oficiale au doar un punct; le desenăm ca pătrat de ~80 m. */
-function workZone(w: PlannedWork): ConstructionZone {
+function workZone(w: PlannedWork & { latitude: number; longitude: number }): ConstructionZone {
   const dLat = 40 / 111_320
   const dLng = dLat / Math.cos((w.latitude * Math.PI) / 180)
   const { latitude: a, longitude: o } = w
@@ -389,8 +407,8 @@ function workZone(w: PlannedWork): ConstructionZone {
       [a + dLat, o + dLng],
       [a + dLat, o - dLng],
     ],
-    startDate: w.starts_at,
-    endDate: w.ends_at,
+    startDate: w.starts_at ?? undefined,
+    endDate: w.ends_at ?? undefined,
     source: (() => {
       try {
         return new URL(w.original_url).hostname
@@ -412,37 +430,60 @@ export type TextReportReply = { reply: string; issue: UserIssue }
 
 // ---------------------------------------------------------------- API public
 
+/**
+ * Observațiile recente, cerute separat pe categorii: altfel prognoza CAMS (72 de ore × 4 poluanți,
+ * sincronizată în bloc) poate ocupa singură limita de 500 de rânduri și ascunde senzorii.
+ */
+function observationsQuery(category: string, fromMs: number, toMs: number, limit = 500): string {
+  const params = new URLSearchParams({
+    category,
+    since: new Date(Date.now() + fromMs).toISOString(),
+    until: new Date(Date.now() + toMs).toISOString(),
+    limit: String(limit),
+  })
+  return `/environment/observations?${params}`
+}
+
+const HOUR = 3_600_000
+
 export const api = {
   async getMapData(): Promise<MapData> {
-    const [reports, observations, features, works] = await Promise.allSettled([
+    const [reports, sensors, official, forecast, features, works] = await Promise.allSettled([
       http<{ items: ApiReport[] }>('/reports?limit=100'),
-      http<{ items: Observation[] }>('/environment/observations?limit=500'),
+      http<{ items: Observation[] }>(observationsQuery('LOW_COST_SENSOR_MEASUREMENT', -2 * HOUR, 0.25 * HOUR)),
+      http<{ items: Observation[] }>(observationsQuery('OFFICIAL_MEASUREMENT', -3 * HOUR, 0.25 * HOUR)),
+      http<{ items: Observation[] }>(observationsQuery('MODEL_FORECAST', -1.5 * HOUR, 1.5 * HOUR, 100)),
       http<{ items: Feature[] }>('/disruptions/features?limit=500'),
       http<{ items: PlannedWork[] }>('/disruptions/planned'),
     ])
-    const all = [reports, observations, features, works]
+    const all = [reports, sensors, official, forecast, features, works]
     if (all.every((r) => r.status === 'rejected')) throw (reports as PromiseRejectedResult).reason
     const items = <T>(r: PromiseSettledResult<{ items: T[] }>) => (r.status === 'fulfilled' ? r.value.items : [])
 
     const osm = splitFeatures(items(features))
+    const located = items(works).filter(
+      (w): w is PlannedWork & { latitude: number; longitude: number } => w.latitude != null && w.longitude != null,
+    )
     return {
-      sensors: toSensors(items(observations)),
+      sensors: toSensors([...items(sensors), ...items(official), ...items(forecast)]),
       hazards: osm.hazards,
-      constructionZones: [...osm.constructionZones, ...items(works).map(workZone)],
+      constructionZones: [...osm.constructionZones, ...located.map(workZone)],
       issues: items(reports).filter(isOpen).map(toIssue),
     }
   },
 
   async getFeedback(id: string): Promise<IssueFeedback> {
-    const f = await http<{ can_vote: boolean; can_resolve: boolean; my_vote: IssueFeedback['myVote'] }>(
-      `/reports/${id}/feedback`,
-      {},
-      true,
-    )
-    return { canVote: f.can_vote, canResolve: f.can_resolve, myVote: f.my_vote }
+    const f = await http<{
+      can_vote: boolean
+      can_resolve: boolean
+      reason: 'own_report' | 'closed' | 'already_voted' | null
+      my_vote: IssueFeedback['myVote']
+    }>(`/reports/${id}/feedback`, {}, true)
+    // `can_resolve` e adevărat și pentru administratori; autorul se recunoaște după `reason`.
+    return { mine: f.reason === 'own_report', canVote: f.can_vote, canResolve: f.can_resolve, myVote: f.my_vote }
   },
 
-  /** Autorul închide issue-ul. Întoarce `null` când a dispărut de pe hartă. */
+  /** Autorul (sau un administrator) închide issue-ul. Întoarce `null` când a dispărut de pe hartă. */
   async resolveIssue(id: string): Promise<UserIssue | null> {
     const r = await http<ApiReport>(`/reports/${id}/resolve`, { method: 'POST' }, true)
     return isOpen(r) ? toIssue(r) : null

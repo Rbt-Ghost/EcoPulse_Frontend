@@ -86,6 +86,8 @@ export type IssueAction = 'resolve' | 'vote'
 
 /** Ce poate face utilizatorul curent cu un issue (din backend). */
 export type IssueFeedback = {
+  /** Issue creat de utilizatorul curent */
+  mine: boolean
   canVote: boolean
   canResolve: boolean
   myVote: 'confirm' | 'dispute' | null
