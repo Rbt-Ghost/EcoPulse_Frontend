@@ -1,12 +1,4 @@
-import {
-  Bot,
-  LocateFixed,
-  Map as MapIcon,
-  Mic,
-  MicOff,
-  SendHorizontal,
-  Sparkles,
-} from 'lucide-react'
+import { Bot, LocateFixed, Map as MapIcon, MapPin, Mic, MicOff, SendHorizontal, Sparkles } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { GeoStatus } from '../hooks/useGeolocation'
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition'
@@ -20,14 +12,16 @@ type Props = {
   accuracy: number | null
   onRelocate: () => void
   onSend: (text: string) => void
+  /** Reia alegerea locului pe hartă pentru raportarea fără GPS */
+  onPickOnMap: () => void
   onShowIssue: (issue: UserIssue) => void
 }
 
 const SUGGESTIONS = [
-  'Groapă mare pe carosabil, periculoasă pentru bicicliști',
-  'Miroase puternic a fum și plastic ars',
-  'Trotuarul e inundat după ploaie',
-  'Un copac căzut blochează trotuarul',
+  'groapa mare pe carosabil, periculoasa pt biciclisti',
+  'miroase puternic a fum si plastic ars',
+  'trotuarul e inundat dupa ploaie nu se poate trece',
+  'un copac cazut blocheaza trotuarul',
 ]
 
 function IssueCard({ issue, onShow }: { issue: UserIssue; onShow: () => void }) {
@@ -95,7 +89,7 @@ export function IssueChat(props: Props) {
       ? `Locație GPS${props.accuracy ? ` · ±${Math.round(props.accuracy)} m` : ''}`
       : props.geoStatus === 'pending'
         ? 'Se determină locația…'
-        : 'Locație aproximativă (centrul Iașului)'
+        : 'Fără GPS · vei alege locul pe hartă'
 
   const onlyWelcome = props.messages.length <= 1
 
@@ -104,7 +98,7 @@ export function IssueChat(props: Props) {
       <header className="panel-header chat-header">
         <div>
           <h1>Raportează o problemă</h1>
-          <p>Descrie ce ai observat. Asistentul AI o va plasa pe hartă, în jurul locației tale.</p>
+          <p>Descrie ce ai observat. O adăugăm pe hartă la locația ta, cu o rază de 500 m – fără alte întrebări.</p>
         </div>
         <button
           className={`geo-pill ${props.geoStatus}`}
@@ -135,6 +129,11 @@ export function IssueChat(props: Props) {
                 <p>{m.text}</p>
               )}
               {m.issue && <IssueCard issue={m.issue} onShow={() => props.onShowIssue(m.issue!)} />}
+              {m.pickLocation && (
+                <button className="btn btn-sm btn-soft full" onClick={props.onPickOnMap}>
+                  <MapPin size={15} /> Alege locul pe hartă
+                </button>
+              )}
             </div>
           </div>
         ))}

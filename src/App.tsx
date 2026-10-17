@@ -1,16 +1,17 @@
-import { ChevronUp } from 'lucide-react'
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Check, ChevronUp, MapPin } from 'lucide-react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { IssueChat } from './components/IssueChat'
 import { MapOverlay } from './components/MapOverlay'
 import { GOOGLE_MAPS_KEY, type MapFocus } from './components/mapTypes'
 import { NavRail, type Tab } from './components/NavRail'
 import { RoutePlanner } from './components/RoutePlanner'
 import { useGeolocation } from './hooks/useGeolocation'
-import { api, getUserId, USING_MOCK } from './services/api'
+import { api, API_URL, ApiError, type ReportPlace } from './services/api'
 import { reverseGeocode } from './services/geocoding'
 import { computeRoutes, openInGoogleMaps } from './services/routing'
 import type {
   ChatMessage,
+  IssueAction,
   LatLng,
   LayerKey,
   LayerVisibility,
@@ -30,14 +31,13 @@ const MapView = lazy(() =>
 const WELCOME: ChatMessage = {
   id: 'welcome',
   role: 'assistant',
-  text: 'Salut! Sunt asistentul EcoPulse. Spune-mi (în scris sau vocal) ce problemă ai observat în jurul tău – o groapă, o zonă inundată, fum, un șantier nesemnalizat – și o adaug pe hartă pentru ceilalți locuitori.',
+  text: 'Salut! Sunt asistentul EcoPulse. Descrie-mi (în scris sau vocal) ce problemă ai observat – o groapă, o zonă inundată, fum, un șantier – și o adaug imediat pe hartă, la locația ta curentă.',
   createdAt: new Date().toISOString(),
 }
 
 type Toast = { id: number; text: string; tone: 'ok' | 'error' }
 
 export default function App() {
-  const userId = useMemo(() => getUserId(), [])
   const geo = useGeolocation()
 
   const [tab, setTab] = useState<Tab>('map')
@@ -61,6 +61,10 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([WELCOME])
   const [sending, setSending] = useState(false)
   const [freshIssueId, setFreshIssueId] = useState<string | null>(null)
+  /** Raportare trimisă fără GPS, care așteaptă locul ales pe hartă */
+  const [awaitingPlace, setAwaitingPlace] = useState<{ text: string; messageId: string } | null>(null)
+  const [picking, setPicking] = useState(false)
+  const [draftPin, setDraftPin] = useState<LatLng | null>(null)
 
   const [focus, setFocus] = useState<MapFocus | null>(null)
   const [sheetOpen, setSheetOpen] = useState(true)
@@ -82,7 +86,7 @@ export default function App() {
     api
       .getMapData()
       .then((d) => alive && setData(d))
-      .catch(() => alive && notify('Nu am putut încărca datele hărții.', 'error'))
+      .catch(() => alive && notify(`Nu am putut contacta serverul EcoPulse (${API_URL}).`, 'error'))
     return () => {
       alive = false
     }
@@ -169,9 +173,9 @@ export default function App() {
   const removeIssue = (id: string) =>
     setData((d) => (d ? { ...d, issues: d.issues.filter((i) => i.id !== id) } : d))
 
-  const deleteIssue = async (issue: UserIssue) => {
+  const resolveIssue = async (issue: UserIssue) => {
     try {
-      await api.deleteIssue(issue.id, userId)
+      await api.resolveIssue(issue.id)
       removeIssue(issue.id)
       notify('Problema a fost eliminată de pe hartă.')
     } catch (e) {
@@ -179,9 +183,9 @@ export default function App() {
     }
   }
 
-  const voteResolve = async (issue: UserIssue) => {
+  const voteResolved = async (issue: UserIssue) => {
     try {
-      const updated = await api.voteResolve(issue.id, userId)
+      const updated = await api.voteResolved(issue.id)
       if (!updated) {
         removeIssue(issue.id)
         notify('Mulțumim! Problema a fost confirmată ca rezolvată și a dispărut de pe hartă.')
@@ -189,10 +193,13 @@ export default function App() {
         setData((d) => (d ? { ...d, issues: d.issues.map((i) => (i.id === updated.id ? updated : i)) } : d))
         notify('Mulțumim pentru confirmare!')
       }
-    } catch {
-      notify('Confirmarea a eșuat.', 'error')
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Confirmarea a eșuat.', 'error')
     }
   }
+
+  const issueAction = (action: IssueAction, issue: UserIssue) =>
+    action === 'resolve' ? resolveIssue(issue) : voteResolved(issue)
 
   const showIssue = (issue: UserIssue) => {
     setTab('map')
@@ -201,39 +208,78 @@ export default function App() {
     if (window.innerWidth < 860) setSheetOpen(false)
   }
 
-  const sendMessage = async (text: string) => {
-    const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', text, createdAt: new Date().toISOString() }
-    const pendingId = crypto.randomUUID()
-    const history = [...messages, userMsg].filter((m) => !m.pending).map(({ role, text }) => ({ role, text }))
-    setMessages((m) => [
-      ...m,
-      userMsg,
-      { id: pendingId, role: 'assistant', text: '', createdAt: new Date().toISOString(), pending: true },
-    ])
+  // ------------------------------------------------------------ raportare
+  const patchMessage = (id: string, patch: Partial<ChatMessage>) =>
+    setMessages((m) => m.map((x) => (x.id === id ? { ...x, ...patch } : x)))
+
+  /** Publică raportarea la locul dat; răspunsul înlocuiește mesajul „pending” cu id-ul dat. */
+  const publish = async (text: string, place: ReportPlace, pendingId: string) => {
     setSending(true)
     try {
-      const res = await api.reportViaChat({ message: text, history, location: geo.position, userId })
-      setMessages((m) =>
-        m.map((x) => (x.id === pendingId ? { ...x, text: res.reply, issue: res.issue, pending: false } : x)),
-      )
-      if (res.issue) {
-        const issue = res.issue
-        setData((d) => (d ? { ...d, issues: [...d.issues, issue] } : d))
-        setFreshIssueId(issue.id)
-        setLayers((l) => ({ ...l, issues: true }))
-        if (window.innerWidth >= 860) setFocus({ lat: issue.lat, lng: issue.lng, zoom: 15, key: Date.now() })
-      }
-    } catch {
-      setMessages((m) =>
-        m.map((x) =>
-          x.id === pendingId
-            ? { ...x, pending: false, text: 'Îmi pare rău, nu am putut procesa mesajul acum. Încearcă din nou în câteva momente.' }
-            : x,
-        ),
-      )
+      const { reply, issue } = await api.reportFromText(text, place)
+      patchMessage(pendingId, { text: reply, issue, pending: false })
+      setData((d) => (d ? { ...d, issues: [...d.issues.filter((i) => i.id !== issue.id), issue] } : d))
+      setFreshIssueId(issue.id)
+      setLayers((l) => ({ ...l, issues: true }))
+      if (window.innerWidth >= 860) setFocus({ lat: issue.lat, lng: issue.lng, zoom: 15, key: Date.now() })
+    } catch (e) {
+      const detail = e instanceof ApiError && e.status === 422 ? ` ${e.message}` : ''
+      patchMessage(pendingId, {
+        pending: false,
+        text: `Nu am putut adăuga problema pe hartă.${detail} Încearcă din nou în câteva momente.`,
+      })
     } finally {
       setSending(false)
     }
+  }
+
+  const sendMessage = async (text: string) => {
+    const pendingId = crypto.randomUUID()
+    setAwaitingPlace(null)
+    setDraftPin(null)
+    setMessages((m) => [
+      // O raportare anterioară care aștepta locul pe hartă e înlocuită de cea nouă.
+      ...m.map((x) => (x.pickLocation ? { ...x, pickLocation: false } : x)),
+      { id: crypto.randomUUID(), role: 'user', text, createdAt: new Date().toISOString() },
+      { id: pendingId, role: 'assistant', text: '', createdAt: new Date().toISOString(), pending: true },
+    ])
+    setSending(true)
+    const fix = await geo.freshFix()
+    setSending(false)
+    if (fix) {
+      await publish(text, fix, pendingId)
+      return
+    }
+    // Fără GPS: utilizatorul alege locul pe hartă.
+    patchMessage(pendingId, {
+      pending: false,
+      pickLocation: true,
+      text: 'Nu am acces la locația ta. Apasă pe hartă locul unde se află problema și confirmă, iar eu o adaug imediat.',
+    })
+    setAwaitingPlace({ text, messageId: pendingId })
+    setPicking(true)
+  }
+
+  const confirmPlace = async () => {
+    if (!awaitingPlace || !draftPin) return
+    const { text, messageId } = awaitingPlace
+    const place = draftPin
+    const pendingId = crypto.randomUUID()
+    patchMessage(messageId, { pickLocation: false })
+    setMessages((m) => [
+      ...m,
+      { id: crypto.randomUUID(), role: 'user', text: 'Locul ales pe hartă', createdAt: new Date().toISOString() },
+      { id: pendingId, role: 'assistant', text: '', createdAt: new Date().toISOString(), pending: true },
+    ])
+    setAwaitingPlace(null)
+    setPicking(false)
+    setDraftPin(null)
+    await publish(text, place, pendingId)
+  }
+
+  const cancelPicking = () => {
+    setPicking(false)
+    setDraftPin(null)
   }
 
   const toggleLayer = (key: LayerKey) => setLayers((l) => ({ ...l, [key]: !l[key] }))
@@ -242,8 +288,10 @@ export default function App() {
     if (routes) openInGoogleMaps(routes[mode], profile)
   }
 
+  const placing = picking && tab === 'report'
+
   return (
-    <div className={`app tab-${tab}${sheetOpen ? ' sheet-open' : ''}`}>
+    <div className={`app tab-${tab}${sheetOpen ? ' sheet-open' : ''}${placing ? ' placing' : ''}`}>
       <NavRail tab={tab} onChange={setTab} issueCount={data?.issues.length ?? 0} />
 
       <aside className="panel" aria-label={tab === 'map' ? 'Planificare traseu' : 'Raportare probleme'}>
@@ -280,11 +328,9 @@ export default function App() {
             accuracy={geo.accuracy}
             onRelocate={geo.locate}
             onSend={sendMessage}
+            onPickOnMap={() => setPicking(true)}
             onShowIssue={showIssue}
           />
-        )}
-        {USING_MOCK && (
-          <div className="demo-note">Mod demo · date simulate local până la conectarea backend-ului</div>
         )}
       </aside>
 
@@ -293,7 +339,6 @@ export default function App() {
           <MapView
             data={data}
             layers={layers}
-            userId={userId}
             userPosition={geo.position}
             hasGps={geo.status === 'gps'}
             from={from}
@@ -302,13 +347,32 @@ export default function App() {
             mode={mode}
             onModeChange={setMode}
             onPickPoint={tab === 'map' ? pickPoint : null}
+            onPlacePick={placing ? setDraftPin : null}
+            draftPin={placing ? draftPin : null}
             focus={focus}
             freshIssueId={freshIssueId}
-            onDeleteIssue={deleteIssue}
-            onVoteResolve={voteResolve}
+            onIssueAction={issueAction}
           />
         </Suspense>
         <MapOverlay layers={layers} onToggle={toggleLayer} loading={!data} />
+        {placing && (
+          <div className="place-banner" role="dialog" aria-label="Alege locul problemei">
+            <MapPin size={18} />
+            <span>
+              {draftPin
+                ? 'Locul a fost marcat. Îl poți muta apăsând din nou pe hartă.'
+                : 'Apasă pe hartă locul unde se află problema.'}
+            </span>
+            <div className="place-banner-actions">
+              <button className="btn btn-sm btn-soft" onClick={cancelPicking}>
+                Anulează
+              </button>
+              <button className="btn btn-sm btn-primary" disabled={!draftPin || sending} onClick={confirmPlace}>
+                <Check size={15} /> Adaugă aici
+              </button>
+            </div>
+          </div>
+        )}
       </main>
 
       {toast && (

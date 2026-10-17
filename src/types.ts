@@ -9,10 +9,12 @@ export type PollutionSensor = {
   lng: number
   /** Indice calitate aer (0–300, scara EU/US simplificată) */
   aqi: number
-  pm25: number
-  pm10: number
-  no2: number
+  pm25: number | null
+  pm10: number | null
+  no2: number | null
   updatedAt: string
+  /** Furnizorul datelor (ex. Sensor.Community, OpenAQ) */
+  source: string
 }
 
 export type HazardKind =
@@ -22,6 +24,7 @@ export type HazardKind =
   | 'manhole'
   | 'traffic_light'
   | 'lighting'
+  | 'roadworks'
 
 export type InfrastructureHazard = {
   id: string
@@ -32,6 +35,7 @@ export type InfrastructureHazard = {
   lat: number
   lng: number
   reportedAt: string
+  source: string
 }
 
 export type ConstructionZone = {
@@ -40,9 +44,10 @@ export type ConstructionZone = {
   description: string
   /** Poligon [lat, lng][] */
   polygon: [number, number][]
-  startDate: string
-  endDate: string
+  startDate?: string
+  endDate?: string
   contractor?: string
+  source: string
 }
 
 export type IssueCategory =
@@ -65,11 +70,25 @@ export type UserIssue = {
   lng: number
   /** Raza zonei afectate, în metri */
   radius: number
-  createdBy: string
+  /** Issue creat de utilizatorul curent (de pe acest dispozitiv) */
+  mine: boolean
   createdAt: string
-  /** Utilizatori (alții decât autorul) care au confirmat că problema s-a rezolvat */
-  resolveVotes: string[]
-  source: 'chat' | 'manual'
+  expiresAt: string
+  /** Câți alți utilizatori au confirmat că problema s-a rezolvat */
+  resolveVotes: number
+  /** Câți alți utilizatori au confirmat că problema există */
+  confirmations: number
+  status: 'pending' | 'confirmed' | 'resolved' | 'hidden' | 'expired'
+}
+
+/** `resolve`: autorul elimină issue-ul; `vote`: alt utilizator confirmă că s-a rezolvat. */
+export type IssueAction = 'resolve' | 'vote'
+
+/** Ce poate face utilizatorul curent cu un issue (din backend). */
+export type IssueFeedback = {
+  canVote: boolean
+  canResolve: boolean
+  myVote: 'confirm' | 'dispute' | null
 }
 
 export type MapData = {
@@ -108,6 +127,8 @@ export type ChatMessage = {
   createdAt: string
   issue?: UserIssue
   pending?: boolean
+  /** Raportare care așteaptă ca utilizatorul să aleagă locul pe hartă (fără GPS) */
+  pickLocation?: boolean
 }
 
 export type LayerKey = 'pollution' | 'hazards' | 'construction' | 'issues'

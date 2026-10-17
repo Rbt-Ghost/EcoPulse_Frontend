@@ -1,22 +1,34 @@
 import { CheckCircle2, Loader2, Trash2 } from 'lucide-react'
-import { useState } from 'react'
-import { RESOLVE_THRESHOLD } from '../services/api'
-import type { UserIssue } from '../types'
+import { useEffect, useState } from 'react'
+import { api, RESOLVE_THRESHOLD } from '../services/api'
+import type { IssueAction, IssueFeedback, UserIssue } from '../types'
 import { timeAgo } from '../utils/geo'
 import { ISSUE_LABELS, SEVERITY_LABELS } from './markerMeta'
 
 type Props = {
   issue: UserIssue
-  userId: string
-  onDelete: (issue: UserIssue) => Promise<void>
-  onVote: (issue: UserIssue) => Promise<void>
+  onAction: (action: IssueAction, issue: UserIssue) => Promise<void>
 }
 
-export function IssuePopup({ issue, userId, onDelete, onVote }: Props) {
+export function IssuePopup({ issue, onAction }: Props) {
   const [busy, setBusy] = useState(false)
-  const mine = issue.createdBy === userId
-  const voted = issue.resolveVotes.includes(userId)
-  const votes = issue.resolveVotes.length
+  const [feedback, setFeedback] = useState<IssueFeedback | null>(null)
+
+  // Backend-ul decide dacă utilizatorul curent e autorul și dacă a votat deja.
+  useEffect(() => {
+    let alive = true
+    api
+      .getFeedback(issue.id)
+      .then((f) => alive && setFeedback(f))
+      .catch(() => alive && setFeedback(null))
+    return () => {
+      alive = false
+    }
+  }, [issue.id, issue.resolveVotes])
+
+  const mine = feedback ? feedback.canResolve : issue.mine
+  const voted = feedback?.myVote != null
+  const votes = issue.resolveVotes
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true)
@@ -51,14 +63,22 @@ export function IssuePopup({ issue, userId, onDelete, onVote }: Props) {
       )}
 
       {mine ? (
-        <button className="btn btn-danger btn-sm full" disabled={busy} onClick={() => run(() => onDelete(issue))}>
+        <button className="btn btn-danger btn-sm full" disabled={busy} onClick={() => run(() => onAction('resolve', issue))}>
           {busy ? <Loader2 size={15} className="spin" /> : <Trash2 size={15} />}
           Problema s-a rezolvat – elimină
         </button>
       ) : (
-        <button className="btn btn-primary btn-sm full" disabled={busy || voted} onClick={() => run(() => onVote(issue))}>
+        <button
+          className="btn btn-primary btn-sm full"
+          disabled={busy || voted || feedback?.canVote === false}
+          onClick={() => run(() => onAction('vote', issue))}
+        >
           {busy ? <Loader2 size={15} className="spin" /> : <CheckCircle2 size={15} />}
-          {voted ? 'Ai confirmat rezolvarea' : 'Confirmă că s-a rezolvat'}
+          {feedback?.myVote === 'dispute'
+            ? 'Ai confirmat rezolvarea'
+            : feedback?.myVote === 'confirm'
+              ? 'Ai confirmat că problema există'
+              : 'Confirmă că s-a rezolvat'}
         </button>
       )}
     </div>

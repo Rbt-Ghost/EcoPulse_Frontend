@@ -9,6 +9,7 @@ import {
   MousePointerClick,
   Wind,
 } from 'lucide-react'
+import type { ReactNode } from 'react'
 import type { MapData, RouteMode, RoutePlace, RouteResult, TravelProfile } from '../types'
 import { aqiBand, formatDistance, formatDuration } from '../utils/geo'
 import { PlaceInput } from './PlaceInput'
@@ -31,6 +32,14 @@ type Props = {
   error: string | null
   onRetry: () => void
   onExport: () => void
+  /** Ora plecării și preferințe (sub mijlocul de deplasare) */
+  options?: ReactNode
+  /** Detaliile rutei selectate (după carduri) */
+  details?: ReactNode
+  /** Călătorii salvate (la final) */
+  footer?: ReactNode
+  /** Cine a calculat rutele */
+  source?: string | null
 }
 
 const PROFILES: { id: TravelProfile; label: string; icon: typeof Footprints }[] = [
@@ -76,7 +85,9 @@ function Insight({ routes }: { routes: RouteResult }) {
 export function RoutePlanner(props: Props) {
   const { data, routes, mode, loading } = props
   const ready = props.from && props.to
-  const avgCity = data ? Math.round(data.sensors.reduce((s, x) => s + x.aqi, 0) / data.sensors.length) : null
+  const avgCity = data?.sensors.length
+    ? Math.round(data.sensors.reduce((s, x) => s + x.aqi, 0) / data.sensors.length)
+    : null
 
   return (
     <div className="panel-body">
@@ -116,6 +127,8 @@ export function RoutePlanner(props: Props) {
           </button>
         ))}
       </div>
+
+      {props.options}
 
       {!ready && (
         <div className="hint-card">
@@ -191,6 +204,8 @@ export function RoutePlanner(props: Props) {
       )}
 
       {routes && !loading && <Insight routes={routes} />}
+      {routes && !loading && props.details}
+      {routes && !loading && props.source && <p className="footnote route-source">{props.source}</p>}
 
       {ready && (
         <button className="btn btn-gmaps" disabled={!routes || loading} onClick={props.onExport}>
@@ -200,14 +215,25 @@ export function RoutePlanner(props: Props) {
         </button>
       )}
 
+      {props.footer}
+
       {data && (
         <section className="city-stats">
           <h2>Iași acum</h2>
           <div className="stats-grid">
             <div className="stat">
-              <span className="stat-dot" style={{ background: aqiBand(avgCity!).color }} />
-              <b>{avgCity}</b>
-              <small>AQI mediu · {aqiBand(avgCity!).label.toLowerCase()}</small>
+              {avgCity !== null ? (
+                <>
+                  <span className="stat-dot" style={{ background: aqiBand(avgCity).color }} />
+                  <b>{avgCity}</b>
+                  <small>AQI mediu · {aqiBand(avgCity).label.toLowerCase()}</small>
+                </>
+              ) : (
+                <>
+                  <b>–</b>
+                  <small>AQI indisponibil momentan</small>
+                </>
+              )}
             </div>
             <div className="stat">
               <span className="stat-dot hazard" />

@@ -21,20 +21,37 @@ npm run dev
 
 ## Backend
 
-Fără `VITE_API_URL`, aplicația rulează în **mod demo**: datele sunt mock (`src/data/mockData.ts`), raportările se păstrează în `localStorage`, iar LLM-ul e simulat de `src/services/mockIssueAgent.ts`.
+Toate datele vin de la [EcoPulse-Hackathon](../EcoPulse-Hackathon) (FastAPI), care trebuie să ruleze împreună cu worker-ul de sincronizare a surselor:
 
-Pentru conectarea backend-ului, copiază `.env.example` în `.env.local` și setează `VITE_API_URL`. Contractul așteptat (tipurile sunt în `src/types.ts`, clientul în `src/services/api.ts`):
+```bash
+cd ../EcoPulse-Hackathon
+python -m venv .venv && .venv/Scripts/pip install -e ".[dev]"
+.venv/Scripts/python -m uvicorn app.main:app --port 8000   # API
+.venv/Scripts/python -m app.workers.sync                    # senzori, OSM, meteo (proces separat)
+```
 
-| Metodă | Rută | Răspuns |
-| --- | --- | --- |
-| `GET` | `/map-data` | `MapData` (`sensors`, `hazards`, `constructionZones`, `issues`) |
-| `DELETE` | `/issues/:id` (header `X-User-Id`) | `204`, doar autorul |
-| `POST` | `/issues/:id/resolve` (header `X-User-Id`) | `{ issue: UserIssue \| null }` (`null` = eliminat) |
-| `POST` | `/issues/report-chat` | `{ reply: string, issue?: UserIssue }` |
+Adresa implicită e `http://localhost:8000/api/v1`; pentru alta, setează `VITE_API_URL` în `.env.local`. Frontend-ul trebuie servit de pe `http://localhost:5173` (sau adaugă originea în `CORS_ORIGINS` din backend).
 
-Body pentru `report-chat`: `{ message, history: {role, text}[], location: {lat, lng}, userId }`. Backend-ul apelează LLM-ul (ex. Gemini) și creează issue-ul cu `radius: 500`.
+Clientul e împărțit în `src/services/http.ts` (sesiune, conturi), `src/services/api.ts` (hartă, raportări, asistent) și `src/services/backend.ts` (rutare, călătorii, mediu, administrare). Toate rutele backend-ului sunt folosite:
 
-Rutarea folosește OSRM public (`routing.openstreetmap.de`) pentru trasee candidate, evaluate local după expunerea la poluare (IDW între senzori) și obstacole (`src/services/routing.ts`). Poate fi mutată ulterior în backend.
+| Tab / funcție | Rute backend |
+| --- | --- |
+| **Cont**: cont anonim automat, autentificare, cont nou, delogare | `POST /auth/register`, `POST /auth/login`, `GET /auth/me` |
+| Stare server (punctul din bara laterală), oraș, atribuiri | `GET /health`, `GET /health/ready`, `GET /config` |
+| **Hartă**: raportări (pin + cerc 500 m), senzori AQI, șantiere OSM, lucrări oficiale | `GET /reports`, `GET /environment/observations`, `GET /disruptions/features`, `GET /disruptions/planned` |
+| Popup raportare: autor/vot, „s-a rezolvat” (3 → dispare), „încă există”, semnalare, închidere de autor, ascundere (admin) | `GET /reports/:id/feedback`, `POST /reports/:id/{dispute,confirm,flag,resolve}`, `POST /admin/reports/:id/hide` |
+| Căutare adrese (cu rezervă directă la Nominatim) | `GET /geocoding/search` |
+| Rute cu ora plecării și ocolirea incidentelor (când serverul are Valhalla; altfel OSRM local) | `POST /routes/alternatives` |
+| Călătorii salvate: salvare, deschidere, redenumire, ștergere | `GET/POST /journeys`, `PUT/DELETE /journeys/:id` |
+| **Raportează**: textul (scris sau dictat) devine direct un issue la locația curentă, rescris de LLM | `POST /reports/from-text` |
+| **Date**: aer pe categorii de surse, meteo pe ore, stații, istoricul raportărilor cu filtre | `GET /environment/observations`, `GET /environment/weather`, `GET /environment/stations`, `GET /reports?status=&category=` |
+| **Admin** (doar rol `admin`): stare surse, rulări de sincronizare, verificarea lucrărilor oficiale | `GET /admin/data-sources/status`, `GET /admin/data-sources/runs`, `GET /admin/works/review`, `PUT /admin/works/:id` |
+
+Rolul de administrator se setează direct în baza de date a backend-ului (coloana `role` din tabelul `users`); nu există un endpoint pentru asta.
+
+Chat-ul nu pune întrebări: trimite textul și locația GPS a browserului la `POST /reports/from-text`, iar backend-ul publică imediat issue-ul (rază 500 m). Dacă în backend e configurat un LLM (`LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL`), acesta rescrie descrierea coerent și alege categoria și gravitatea; altfel se folosește o rescriere deterministă. Fără acces la GPS, utilizatorul alege locul pe hartă și confirmă cu „Adaugă aici”.
+
+Fără Valhalla (`VALHALLA_BASE_URL` gol în backend), rutele vin de la OSRM public (`routing.openstreetmap.de`) și sunt evaluate local după expunerea la poluare (IDW între senzori) și obstacole (`src/services/routing.ts`).
 
 ## Google Maps
 

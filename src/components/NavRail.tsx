@@ -23,7 +23,13 @@ export function Logo() {
   )
 }
 
-export function NavRail({ tab, onChange, issueCount }: { tab: Tab; onChange: (t: Tab) => void; issueCount: number }) {
+type Props = {
+  tab: Tab
+  onChange: (t: Tab) => void
+  issueCount: number
+}
+
+export function NavRail({ tab, onChange, issueCount }: Props) {
   return (
     <nav className="nav-rail" aria-label="Navigare principală">
       <div className="brand">

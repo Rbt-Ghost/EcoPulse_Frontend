@@ -1,4 +1,4 @@
-import { IASI_BOUNDS } from '../data/mockData'
+import { IASI_BOUNDS } from '../data/iasi'
 import type { LatLng, RoutePlace } from '../types'
 
 // Nominatim (OpenStreetMap) – limitat la zona Iașului.

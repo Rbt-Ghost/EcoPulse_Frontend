@@ -5,6 +5,7 @@ import type {
   RouteMode,
   RoutePlace,
   RouteResult,
+  IssueAction,
   UserIssue,
 } from '../types'
 
@@ -14,7 +15,6 @@ export type MapFocus = { lat: number; lng: number; zoom?: number; key: number }
 export type MapViewProps = {
   data: MapData | null
   layers: LayerVisibility
-  userId: string
   userPosition: LatLng
   hasGps: boolean
   from: RoutePlace | null
@@ -23,10 +23,13 @@ export type MapViewProps = {
   mode: RouteMode
   onModeChange: (m: RouteMode) => void
   onPickPoint: ((which: 'from' | 'to', p: LatLng) => void) | null
+  /** Când e setat, un clic pe hartă alege direct un punct (locul unei raportări) */
+  onPlacePick: ((p: LatLng) => void) | null
+  /** Locul ales pentru raportarea manuală */
+  draftPin: LatLng | null
   focus: MapFocus | null
   freshIssueId: string | null
-  onDeleteIssue: (issue: UserIssue) => Promise<void>
-  onVoteResolve: (issue: UserIssue) => Promise<void>
+  onIssueAction: (action: IssueAction, issue: UserIssue) => Promise<void>
 }
 
 /** Cheia Google Maps; fără ea aplicația folosește harta Leaflet + OpenStreetMap. */

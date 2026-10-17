@@ -9,7 +9,7 @@ import {
 } from '@vis.gl/react-google-maps'
 import { Construction, Crosshair, Flag, MapPin } from 'lucide-react'
 import { createElement, Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { IASI_BOUNDS, IASI_CENTER } from '../data/mockData'
+import { IASI_BOUNDS, IASI_CENTER } from '../data/iasi'
 import type { LatLng, MapData, PollutionSensor, RouteResult, UserIssue } from '../types'
 import { aqiAt, aqiBand, aqiColor, polygonCenter, timeAgo } from '../utils/geo'
 import { IssuePopup } from './IssuePopup'
@@ -175,7 +175,7 @@ function LocateButton({ position, hasGps }: { position: LatLng; hasGps: boolean 
 // ------------------------------------------------------------------ hartă
 
 function GoogleMapInner(props: MapViewProps) {
-  const { data, layers, routes, mode, userId } = props
+  const { data, layers, routes, mode } = props
   const [selected, setSelected] = useState<Selected | null>(null)
   const drawOrder = routeDrawOrder(mode)
 
@@ -197,6 +197,10 @@ function GoogleMapInner(props: MapViewProps) {
   const onMapClick = (e: MapMouseEvent) => {
     // Oprim fereastra implicită Google pentru punctele de interes.
     if (e.detail.placeId) e.stop()
+    if (props.onPlacePick && e.detail.latLng) {
+      props.onPlacePick(e.detail.latLng)
+      return
+    }
     if (!props.onPickPoint || !e.detail.latLng) {
       setSelected(null)
       return
@@ -279,7 +283,7 @@ function GoogleMapInner(props: MapViewProps) {
 
         {data && layers.issues &&
           data.issues.map((iss) => {
-            const mine = iss.createdBy === userId
+            const mine = iss.mine
             return (
               <GCircle
                 key={`c-${iss.id}`}
@@ -314,7 +318,7 @@ function GoogleMapInner(props: MapViewProps) {
 
         {data && layers.issues &&
           data.issues.map((iss) => {
-            const mine = iss.createdBy === userId
+            const mine = iss.mine
             const fresh = iss.id === props.freshIssueId
             return (
               <AdvancedMarker
@@ -350,6 +354,15 @@ function GoogleMapInner(props: MapViewProps) {
           <AdvancedMarker position={props.userPosition} anchorPoint={AdvancedMarkerAnchorPoint.CENTER} zIndex={900}>
             <div className="mk-user">
               <span />
+            </div>
+          </AdvancedMarker>
+        )}
+        {props.draftPin && (
+          <AdvancedMarker position={props.draftPin} zIndex={1100}>
+            <div className="mk-issue mine fresh">
+              <div className="pin">
+                <MapPin size={16} />
+              </div>
             </div>
           </AdvancedMarker>
         )}
@@ -389,9 +402,7 @@ function GoogleMapInner(props: MapViewProps) {
             <SelectedContent
               selected={selected.kind}
               item={selectedItem}
-              userId={userId}
-              onDelete={props.onDeleteIssue}
-              onVote={props.onVoteResolve}
+              onAction={props.onIssueAction}
             />
           </InfoWindow>
         )}
@@ -408,13 +419,11 @@ type Item = MapData['sensors'][number] | MapData['hazards'][number] | MapData['c
 function SelectedContent(props: {
   selected: 'sensor' | 'hazard' | 'construction' | 'issue'
   item: Item
-  userId: string
-  onDelete: (i: UserIssue) => Promise<void>
-  onVote: (i: UserIssue) => Promise<void>
+  onAction: MapViewProps['onIssueAction']
 }) {
   const { selected, item } = props
   if (selected === 'issue') {
-    return <IssuePopup issue={item as UserIssue} userId={props.userId} onDelete={props.onDelete} onVote={props.onVote} />
+    return <IssuePopup issue={item as UserIssue} onAction={props.onAction} />
   }
   if (selected === 'sensor') {
     const s = item as PollutionSensor
@@ -425,11 +434,11 @@ function SelectedContent(props: {
         <h4>Senzor · {s.name}</h4>
         <div className="sensor-grid">
           <div><b>{s.aqi}</b><span>AQI</span></div>
-          <div><b>{s.pm25}</b><span>PM2.5 µg/m³</span></div>
-          <div><b>{s.pm10}</b><span>PM10 µg/m³</span></div>
-          <div><b>{s.no2}</b><span>NO₂ µg/m³</span></div>
+          <div><b>{s.pm25 ?? '–'}</b><span>PM2.5 µg/m³</span></div>
+          <div><b>{s.pm10 ?? '–'}</b><span>PM10 µg/m³</span></div>
+          <div><b>{s.no2 ?? '–'}</b><span>NO₂ µg/m³</span></div>
         </div>
-        <div className="popup-meta">Actualizat {timeAgo(s.updatedAt)}</div>
+        <div className="popup-meta">Actualizat {timeAgo(s.updatedAt)} · {s.source}</div>
       </div>
     )
   }
@@ -440,7 +449,7 @@ function SelectedContent(props: {
         <span className={`popup-tag hazard sev-${h.severity}`}>Hazard infrastructură</span>
         <h4>{h.title}</h4>
         <p>{h.description}</p>
-        <div className="popup-meta">Semnalat {timeAgo(h.reportedAt)} · sursă: Primăria Iași</div>
+        <div className="popup-meta">Semnalat {timeAgo(h.reportedAt)} · sursă: {h.source}</div>
       </div>
     )
   }
@@ -451,7 +460,10 @@ function SelectedContent(props: {
       <h4>{z.title}</h4>
       <p>{z.description}</p>
       <div className="popup-meta">
-        {new Date(z.startDate).toLocaleDateString('ro-RO')} – {new Date(z.endDate).toLocaleDateString('ro-RO')}
+        {z.startDate && z.endDate
+          ? `${new Date(z.startDate).toLocaleDateString('ro-RO')} – ${new Date(z.endDate).toLocaleDateString('ro-RO')} · `
+          : ''}
+        sursă: {z.source}
         {z.contractor && <> · {z.contractor}</>}
       </div>
     </div>
