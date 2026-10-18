@@ -1,11 +1,10 @@
-import { ChevronDown, Construction, Layers, MessageSquareWarning, TriangleAlert, Wind } from 'lucide-react'
+import { ChevronDown, Construction, Layers, MessageSquareWarning, Wind } from 'lucide-react'
 import { useState } from 'react'
 import type { LayerKey, LayerVisibility } from '../types'
 import { AQI_BANDS } from '../utils/geo'
 
 const LAYERS: { key: LayerKey; label: string; icon: typeof Wind; cls: string }[] = [
   { key: 'pollution', label: 'Poluare', icon: Wind, cls: 'pollution' },
-  { key: 'hazards', label: 'Hazard-uri', icon: TriangleAlert, cls: 'hazard' },
   { key: 'construction', label: 'Șantiere', icon: Construction, cls: 'construction' },
   { key: 'issues', label: 'Raportări', icon: MessageSquareWarning, cls: 'issue' },
 ]
@@ -63,9 +62,8 @@ export function MapOverlay({ layers, onToggle, loading }: Props) {
               </div>
             </div>
             <ul className="legend-items">
-              <li><span className="lg lg-hazard" /> Hazard infrastructură</li>
               <li><span className="lg lg-construction" /> Zonă în construcție</li>
-              <li><span className="lg lg-issue" /> Raportare utilizator (500 m)</li>
+              <li><span className="lg lg-issue" /> Raportare utilizator (100 m)</li>
               <li><span className="lg lg-mine" /> Raportarea ta</li>
             </ul>
           </div>

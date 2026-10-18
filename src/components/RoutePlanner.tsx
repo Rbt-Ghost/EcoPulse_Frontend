@@ -83,7 +83,7 @@ function Insight({ routes }: { routes: RouteResult }) {
 }
 
 export function RoutePlanner(props: Props) {
-  const { data, routes, mode, loading } = props
+  const { data, routes, mode, loading, profile } = props
   const ready = props.from && props.to
   const avgCity = data?.sensors.length
     ? Math.round(data.sensors.reduce((s, x) => s + x.aqi, 0) / data.sensors.length)
@@ -185,6 +185,12 @@ export function RoutePlanner(props: Props) {
                     ) : (
                       <span className="obstacle-chip ok">fără obstacole</span>
                     )}
+                    {r.traffic && (
+                      <span className="obstacle-chip" title="Trafic estimat, nu măsurat în timp real">
+                        <Car size={12} /> {r.traffic.worst_level ? `trafic ${r.traffic.worst_level}` : `trafic mediu ${Math.round(r.traffic.avg_congestion * 100)}%`}
+                        {profile === 'car' && r.traffic.congested_m > 0 && ` · ${Math.round(r.traffic.congested_m / 100) / 10} km aglomerat`}
+                      </span>
+                    )}
                   </span>
                 )}
               </button>
@@ -234,11 +240,6 @@ export function RoutePlanner(props: Props) {
                   <small>AQI indisponibil momentan</small>
                 </>
               )}
-            </div>
-            <div className="stat">
-              <span className="stat-dot hazard" />
-              <b>{data.hazards.length}</b>
-              <small>hazard-uri infrastructură</small>
             </div>
             <div className="stat">
               <span className="stat-dot construction" />

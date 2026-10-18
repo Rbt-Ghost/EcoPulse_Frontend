@@ -21,7 +21,6 @@ import { IssuePopup } from './IssuePopup'
 import {
   constructionIcon,
   endpointIcon,
-  hazardIcon,
   issueIcon,
   sensorIcon,
   userIcon,
@@ -138,6 +137,17 @@ function ClickPicker({ onPick }: { onPick: (which: 'from' | 'to', p: LatLng) => 
   )
 }
 
+/** Harta își schimbă lățimea când se deschide panoul calității aerului; Leaflet nu observă singur asta. */
+function ResizeWatcher() {
+  const map = useMap()
+  useEffect(() => {
+    const observer = new ResizeObserver(() => map.invalidateSize())
+    observer.observe(map.getContainer())
+    return () => observer.disconnect()
+  }, [map])
+  return null
+}
+
 function LocateButton({ position, hasGps }: { position: LatLng; hasGps: boolean }) {
   const map = useMap()
   return (
@@ -175,6 +185,7 @@ export default function LeafletMapView(props: MapViewProps) {
         className="base-tiles"
       />
 
+      <ResizeWatcher />
       <FocusController focus={props.focus} />
       <FitRoutes routes={routes} />
       {props.onPlacePick ? (
@@ -243,20 +254,6 @@ export default function LeafletMapView(props: MapViewProps) {
             </Fragment>
           )
         })}
-
-      {data && layers.hazards &&
-        data.hazards.map((h) => (
-          <Marker key={h.id} position={[h.lat, h.lng]} icon={hazardIcon(h.kind, h.severity)}>
-            <Popup>
-              <div className="popup">
-                <span className={`popup-tag hazard sev-${h.severity}`}>Hazard infrastructură</span>
-                <h4>{h.title}</h4>
-                <p>{h.description}</p>
-                <div className="popup-meta">Semnalat {timeAgo(h.reportedAt)} · sursă: {h.source}</div>
-              </div>
-            </Popup>
-          </Marker>
-        ))}
 
       {data && layers.issues &&
         data.issues.map((iss) => {

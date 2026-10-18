@@ -98,7 +98,7 @@ export function IssueChat(props: Props) {
       <header className="panel-header chat-header">
         <div>
           <h1>Raportează o problemă</h1>
-          <p>Descrie ce ai observat. O adăugăm pe hartă la locația ta, cu o rază de 500 m – fără alte întrebări.</p>
+          <p>Descrie ce ai observat. O adăugăm pe hartă la locația ta, cu o rază de 100 m – fără alte întrebări.</p>
         </div>
         <button
           className={`geo-pill ${props.geoStatus}`}

@@ -22,6 +22,7 @@
   --shadow-lg: 0 24px 60px -20px rgba(15, 31, 29, 0.35);
   --rail-w: 88px;
   --panel-w: 410px;
+  --aq-w: 360px;
   --mobile-nav-h: 68px;
   --font: 'Plus Jakarta Sans', system-ui, 'Segoe UI', Roboto, sans-serif;
 
@@ -100,7 +101,7 @@ p {
 
 .app {
   display: grid;
-  grid-template-columns: var(--rail-w) var(--panel-w) 1fr;
+  grid-template-columns: var(--rail-w) var(--panel-w) 1fr auto;
   height: 100dvh;
 }
 
@@ -757,10 +758,6 @@ p {
   border-radius: 50%;
 }
 
-.stat-dot.hazard {
-  background: #ef4444;
-}
-
 .stat-dot.construction {
   background: var(--warn);
 }
@@ -832,9 +829,6 @@ p {
 
 .layer-chip.pollution {
   --c: #16a34a;
-}
-.layer-chip.hazard {
-  --c: #dc2626;
 }
 .layer-chip.construction {
   --c: #d97706;
@@ -936,13 +930,6 @@ p {
   width: 16px;
   height: 16px;
   flex-shrink: 0;
-}
-
-.lg-hazard {
-  border-radius: 5px;
-  background: #ef4444;
-  rotate: 45deg;
-  scale: 0.75;
 }
 
 .lg-construction {
@@ -1063,31 +1050,6 @@ p {
   font-size: 11.5px;
   font-weight: 800;
   color: #1f2937;
-}
-
-.mk-hazard {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border-radius: 9px;
-  rotate: 45deg;
-  color: #fff;
-  background: #f97316;
-  border: 2px solid #fff;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
-}
-
-.mk-hazard svg {
-  rotate: -45deg;
-}
-
-.mk-hazard.sev-high {
-  background: #dc2626;
-}
-
-.mk-hazard.sev-low {
-  background: #f59e0b;
 }
 
 .mk-construction {
@@ -1249,14 +1211,6 @@ p {
 
 .popup-tag.construction {
   background: #d97706;
-}
-
-.popup-tag.hazard {
-  background: #f97316;
-}
-
-.popup-tag.hazard.sev-high {
-  background: #dc2626;
 }
 
 .popup-tag.issue {
@@ -2795,6 +2749,554 @@ p {
   }
 
   .nav-foot {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------------------------ calitatea aerului (sidebar) */
+
+.aq {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 30px -18px rgba(15, 31, 29, 0.25);
+  z-index: 10;
+}
+
+.aq.open {
+  width: var(--aq-w);
+}
+
+.aq.closed {
+  width: 68px;
+}
+
+.aq-toggle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 18px 6px;
+  color: var(--text-2);
+  transition: background 0.2s;
+}
+
+.aq-toggle:hover {
+  background: var(--surface-2);
+  color: var(--accent-ink);
+}
+
+.aq-toggle-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.25;
+}
+
+.aq-toggle-label small {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+
+.aq-toggle-alert {
+  color: var(--danger);
+}
+
+.aq-chip {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 8px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.aq-chip.sm {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.aq-chip.md {
+  width: 30px;
+  height: 30px;
+  font-size: 15px;
+}
+
+.aq-chip.lg {
+  width: 58px;
+  height: 58px;
+  border-radius: 16px;
+  font-size: 30px;
+}
+
+.aq-chip.pending {
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.aq-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 24px 20px 12px;
+}
+
+.aq-header h2 {
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.aq-header p {
+  margin-top: 2px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.aq-close {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  color: var(--text-2);
+  background: var(--surface-2);
+}
+
+.aq-close:hover {
+  color: var(--accent);
+}
+
+.aq-close .mobile-only {
+  display: none;
+}
+
+.aq-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  transition: opacity 0.2s;
+}
+
+/* Reîmprospătare: păstrăm datele vechi, doar estompate */
+.aq-body.refreshing {
+  opacity: 0.6;
+}
+
+.aq-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 18px 0;
+  color: var(--text-2);
+  font-size: 13.5px;
+}
+
+.aq-alert {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: #fef2f2;
+  box-shadow: inset 0 0 0 1px #fecaca;
+  color: #991b1b;
+  font-size: 13px;
+}
+
+.aq-alert svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.aq-alert p {
+  margin-top: 2px;
+  color: #7f1d1d;
+}
+
+.aq-alert.soft {
+  background: #fffbeb;
+  box-shadow: inset 0 0 0 1px #fde68a;
+  color: #92400e;
+}
+
+.aq-alert.soft p {
+  color: #78350f;
+}
+
+.aq-now {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.aq-now > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.aq-eyebrow {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.aq-now-label {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.aq-now-sub {
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.aq-advice {
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.aq-readings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.aq-reading {
+  display: grid;
+  grid-template-columns: 52px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+}
+
+.aq-reading + .aq-reading {
+  border-top: 1px solid var(--border);
+}
+
+.aq-reading-name {
+  font-weight: 700;
+}
+
+.aq-reading-value b {
+  font-size: 15px;
+}
+
+.aq-reading-value small,
+.aq-extra small {
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.aq-reading-level {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.aq-extra {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 0;
+}
+
+.aq-extra div {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.aq-extra dt {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+
+.aq-extra dd {
+  margin: 2px 0 0;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.aq-forecast {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.aq-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.aq-section-head h3 {
+  font-size: 14.5px;
+  font-weight: 800;
+}
+
+.aq-seg {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.aq-seg button {
+  padding: 4px 9px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-3);
+}
+
+.aq-seg button.on {
+  background: var(--surface);
+  color: var(--accent-ink);
+  box-shadow: var(--shadow-sm);
+}
+
+.aq-chart-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.aq-chart {
+  margin: 0 -4px;
+}
+
+.aq-chart-placeholder {
+  height: 190px;
+}
+
+.aq-chart .recharts-surface:focus {
+  outline: none;
+}
+
+.aq-tooltip {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.aq-tooltip-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+}
+
+.aq-tooltip-value b {
+  font-size: 15px;
+}
+
+.aq-line-key {
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  background: #0d9488;
+}
+
+.aq-tooltip-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.aq-strip-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+
+.aq-strip {
+  display: flex;
+  gap: 2px;
+}
+
+.aq-strip-cell {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.aq-table summary {
+  cursor: pointer;
+  padding: 6px 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent-ink);
+}
+
+.aq-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.aq-table th,
+.aq-table td {
+  padding: 5px 4px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.aq-table th:first-child,
+.aq-table td:last-child {
+  text-align: left;
+}
+
+.aq-table thead th {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.aq-table tbody th {
+  font-weight: 700;
+}
+
+.aq-table tbody th small {
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+.aq-level-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.aq-muted,
+.aq-stale {
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.aq-stale button {
+  color: var(--accent-ink);
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.aq-source {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.aq-source a {
+  color: inherit;
+}
+
+/* Ecrane medii: panoul deschis acoperă harta în loc să o îngusteze */
+@media (min-width: 861px) and (max-width: 1279px) {
+  .aq.open {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 900;
+    box-shadow: var(--shadow-lg);
+  }
+}
+
+@media (max-width: 860px) {
+  .aq.closed {
+    position: fixed;
+    top: calc(60px + env(safe-area-inset-top));
+    left: 12px;
+    width: auto;
+    z-index: 600;
+    border: 0;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    box-shadow: var(--shadow);
+  }
+
+  .aq-toggle {
+    flex-direction: row;
+    gap: 8px;
+    padding: 6px 12px 6px 8px;
+    border-radius: 14px;
+  }
+
+  .aq-toggle .lucide-wind {
+    display: none;
+  }
+
+  .aq-toggle-label {
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .aq.open {
+    position: fixed;
+    inset: 0 0 calc(var(--mobile-nav-h) + env(safe-area-inset-bottom)) 0;
+    width: auto;
+    z-index: 1150;
+    border-left: 0;
+  }
+
+  .aq-header {
+    padding-top: calc(18px + env(safe-area-inset-top));
+  }
+
+  .aq-close .desktop-only {
+    display: none;
+  }
+
+  .aq-close .mobile-only {
+    display: block;
+  }
+
+  /* Pe mobil butonul stă pe hartă: îl ascundem când harta nu se vede */
+  .tab-report .aq.closed,
+  .app.placing .aq.closed {
     display: none;
   }
 }

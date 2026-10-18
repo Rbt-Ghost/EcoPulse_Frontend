@@ -2,9 +2,9 @@ import L from 'leaflet'
 import { Construction, type LucideIcon } from 'lucide-react'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import type { HazardKind, IssueCategory, Severity } from '../types'
+import type { IssueCategory } from '../types'
 import { aqiBand } from '../utils/geo'
-import { HAZARD_ICONS, ISSUE_ICONS } from './markerMeta'
+import { ISSUE_ICONS } from './markerMeta'
 
 const svg = (Icon: LucideIcon, size = 16) =>
   renderToStaticMarkup(createElement(Icon, { size, strokeWidth: 2.4, color: 'currentColor' }))
@@ -28,18 +28,6 @@ export function sensorIcon(aqi: number) {
       iconSize: [34, 34],
       iconAnchor: [17, 17],
       popupAnchor: [0, -16],
-    }),
-  )
-}
-
-export function hazardIcon(kind: HazardKind, severity: Severity) {
-  return cached(`h-${kind}-${severity}`, () =>
-    L.divIcon({
-      className: 'ep-marker',
-      html: `<div class="mk-hazard sev-${severity}">${svg(HAZARD_ICONS[kind], 15)}</div>`,
-      iconSize: [30, 30],
-      iconAnchor: [15, 15],
-      popupAnchor: [0, -14],
     }),
   )
 }

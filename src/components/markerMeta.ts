@@ -1,7 +1,5 @@
 import {
   AlertTriangle,
-  CircleDot,
-  Construction,
   Cloud,
   Droplets,
   HardHat,
@@ -11,19 +9,9 @@ import {
   TreeDeciduous,
   type LucideIcon,
 } from 'lucide-react'
-import type { HazardKind, IssueCategory, Severity, UserIssue } from '../types'
+import type { IssueCategory, Severity, UserIssue } from '../types'
 
 // Metadate pentru marcatori, independente de biblioteca de hartă.
-
-export const HAZARD_ICONS: Record<HazardKind, LucideIcon> = {
-  pothole: CircleDot,
-  sidewalk: AlertTriangle,
-  flooding: Droplets,
-  manhole: CircleDot,
-  traffic_light: TrafficCone,
-  lighting: Lightbulb,
-  roadworks: Construction,
-}
 
 export const ISSUE_ICONS: Record<IssueCategory, LucideIcon> = {
   infrastructure: AlertTriangle,

@@ -1,16 +1,19 @@
 import { Check, ChevronUp, MapPin } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { AirQualitySidebar } from './components/AirQualitySidebar'
 import { IssueChat } from './components/IssueChat'
 import { MapOverlay } from './components/MapOverlay'
 import { GOOGLE_MAPS_KEY, type MapFocus } from './components/mapTypes'
 import { NavRail, type Tab } from './components/NavRail'
 import { RoutePlanner } from './components/RoutePlanner'
 import { IASI_CENTER } from './data/iasi'
+import { useAirQuality } from './hooks/useAirQuality'
 import { useGeolocation } from './hooks/useGeolocation'
 import { api, API_URL, ApiError, MAX_REPORT_ACCURACY, type ReportPlace } from './services/api'
 import { reverseGeocode } from './services/geocoding'
 import { computeRoutes, openInGoogleMaps } from './services/routing'
 import type {
+  AirQuality,
   ChatMessage,
   IssueAction,
   LatLng,
@@ -45,7 +48,6 @@ export default function App() {
   const [data, setData] = useState<MapData | null>(null)
   const [layers, setLayers] = useState<LayerVisibility>({
     pollution: true,
-    hazards: true,
     construction: true,
     issues: true,
   })
@@ -74,6 +76,16 @@ export default function App() {
   const notify = useCallback((text: string, tone: Toast['tone'] = 'ok') => {
     setToast({ id: Date.now(), text, tone })
   }, [])
+
+  // ------------------------------------------------------------ calitatea aerului
+  // Pe ecrane late panoul de prognoză pornește deschis; pe telefon e doar butonul de pe hartă.
+  const [airOpen, setAirOpen] = useState(() => window.innerWidth >= 1280)
+  const onAirAlert = useCallback(
+    (d: AirQuality) =>
+      notify(`Alertă de poluare: PM2.5 la nivel „${d.pm25.label}”. ${d.pm25.recommendation ?? ''}`.trim(), 'error'),
+    [notify],
+  )
+  const air = useAirQuality(onAirAlert)
 
   useEffect(() => {
     if (!toast) return
@@ -108,12 +120,11 @@ export default function App() {
         setRouteLoading(false)
         return
       }
-      const snapshot = dataRef.current ?? { sensors: [], hazards: [], constructionZones: [], issues: [] }
       const ctrl = new AbortController()
       routeAbort.current = ctrl
       setRouteLoading(true)
       try {
-        const result = await computeRoutes(f, t, p, snapshot, ctrl.signal)
+        const result = await computeRoutes(f, t, p, ctrl.signal)
         if (!ctrl.signal.aborted) setRoutes(result)
       } catch (e) {
         if (ctrl.signal.aborted) return
@@ -297,7 +308,9 @@ export default function App() {
   const placing = picking && tab === 'report'
 
   return (
-    <div className={`app tab-${tab}${sheetOpen ? ' sheet-open' : ''}${placing ? ' placing' : ''}`}>
+    <div
+      className={`app tab-${tab}${sheetOpen ? ' sheet-open' : ''}${placing ? ' placing' : ''}${airOpen ? ' aq-open' : ''}`}
+    >
       <NavRail tab={tab} onChange={setTab} issueCount={data?.issues.length ?? 0} />
 
       <aside className="panel" aria-label={tab === 'map' ? 'Planificare traseu' : 'Raportare probleme'}>
@@ -325,6 +338,7 @@ export default function App() {
             error={routeError}
             onRetry={() => requestRoutes(from, to, profile)}
             onExport={exportRoute}
+            source="Trafic estimat din profilul orar RNMCA IS-1, drumuri OSM și raportări active · fără date live de trafic."
           />
         ) : (
           <IssueChat
@@ -380,6 +394,15 @@ export default function App() {
           </div>
         )}
       </main>
+
+      <AirQualitySidebar
+        data={air.data}
+        error={air.error}
+        loading={air.loading}
+        open={airOpen}
+        onToggle={() => setAirOpen((o) => !o)}
+        onRetry={air.reload}
+      />
 
       {toast && (
         <div key={toast.id} className={`toast ${toast.tone}`} role="status">

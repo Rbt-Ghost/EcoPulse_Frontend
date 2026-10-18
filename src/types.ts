@@ -17,27 +17,6 @@ export type PollutionSensor = {
   source: string
 }
 
-export type HazardKind =
-  | 'pothole'
-  | 'sidewalk'
-  | 'flooding'
-  | 'manhole'
-  | 'traffic_light'
-  | 'lighting'
-  | 'roadworks'
-
-export type InfrastructureHazard = {
-  id: string
-  kind: HazardKind
-  title: string
-  description: string
-  severity: Severity
-  lat: number
-  lng: number
-  reportedAt: string
-  source: string
-}
-
 export type ConstructionZone = {
   id: string
   title: string
@@ -95,9 +74,59 @@ export type IssueFeedback = {
 
 export type MapData = {
   sensors: PollutionSensor[]
-  hazards: InfrastructureHazard[]
   constructionZones: ConstructionZone[]
   issues: UserIssue[]
+}
+
+/** Indicele RNMCA: 1 Bun … 6 Extrem de rău; 0 când valoarea lipsește. */
+export type RnmcaCode = 0 | 1 | 2 | 3 | 4 | 5 | 6
+
+export type RnmcaPollutant = 'pm25' | 'pm10' | 'no2'
+
+/** Concentrație (µg/m³) clasificată pe scara RNMCA. */
+export type AirReading = {
+  value: number | null
+  code: RnmcaCode
+  label: string
+  recommendation: string | null
+}
+
+export type AirQualityHour = {
+  /** ISO 8601, UTC */
+  time: string
+  pm25: number | null
+  pm10: number | null
+  no2: number | null
+  o3: number | null
+  so2: number | null
+  europeanAqi: number | null
+  /** Indicele general: cel mai rău dintre PM2.5, PM10 și NO₂ */
+  code: RnmcaCode
+  label: string
+  pm25Code: RnmcaCode
+  pm25Label: string
+}
+
+/** Calitatea aerului în Iași acum + prognoza orară CAMS (`GET /air-quality`). */
+export type AirQuality = {
+  /** Fusul orar al prognozei (Europe/Bucharest) */
+  timezone: string
+  /** Ora citirii curente, ISO 8601 UTC */
+  updatedAt: string | null
+  overall: AirReading & { pollutant: RnmcaPollutant | null }
+  pm25: AirReading
+  pm10: AirReading
+  no2: AirReading
+  o3: number | null
+  so2: number | null
+  europeanAqi: number | null
+  /** PM2.5 la nivel „Moderat” sau mai rău */
+  alert: boolean
+  hours: AirQualityHour[]
+  source: string
+  license: string
+  licenseUrl: string
+  limitation: string
 }
 
 export type RouteMode = 'cleanest' | 'balanced' | 'fastest'
@@ -116,8 +145,12 @@ export type RouteCandidate = {
   avgAqi: number
   /** Expunere cumulată (AQI × km) */
   exposure: number
-  /** Număr de hazard-uri / șantiere / probleme întâlnite */
+  /** Număr de șantiere / probleme întâlnite */
   obstacles: number
+  /** Indice de trafic estimat din RNMCA IS-1, drumuri OSM și raportări active. */
+  traffic?: { avg_congestion: number; congested_m: number; worst_level: string | null }
+  /** Link generat de backend, cu puncte de ghidare pe traseul selectat. */
+  googleMapsUrl?: string
 }
 
 export type RouteResult = Record<RouteMode, RouteCandidate>
@@ -133,5 +166,5 @@ export type ChatMessage = {
   pickLocation?: boolean
 }
 
-export type LayerKey = 'pollution' | 'hazards' | 'construction' | 'issues'
+export type LayerKey = 'pollution' | 'construction' | 'issues'
 export type LayerVisibility = Record<LayerKey, boolean>

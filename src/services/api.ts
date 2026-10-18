@@ -1,11 +1,13 @@
 import type {
+  AirQuality,
+  AirReading,
   ConstructionZone,
-  HazardKind,
-  InfrastructureHazard,
   IssueCategory,
   IssueFeedback,
   MapData,
   PollutionSensor,
+  RnmcaCode,
+  RnmcaPollutant,
   Severity,
   UserIssue,
 } from '../types'
@@ -23,6 +25,7 @@ import type {
  *   GET  /environment/observations                măsurători PM2.5 / PM10 / NO₂ recente (pe categorii)
  *   GET  /disruptions/features, /disruptions/planned   șantiere OSM și lucrări oficiale active
  *   POST /reports/from-text                       chat-ul de raportare: text → issue (rescris de LLM dacă e configurat)
+ *   GET  /air-quality                             aer acum + prognoză orară CAMS, pe scara RNMCA (1–6)
  */
 export const API_URL: string = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1').replace(/\/$/, '')
 
@@ -31,7 +34,7 @@ export const RESOLVE_THRESHOLD = 3
 /** Precizia GPS minimă acceptată de backend pentru o raportare (`accuracy_m` ≤ 1000). */
 export const MAX_REPORT_ACCURACY = 1000
 /** Raza zonei afectate de un issue, în metri. */
-export const ISSUE_RADIUS = 500
+export const ISSUE_RADIUS = 100
 
 export class ApiError extends Error {
   readonly status: number
@@ -359,54 +362,70 @@ function featureDescription(tags: Record<string, string>): string {
   return `Zonă marcată în construcție pe OpenStreetMap${kind}. Perioada și restricțiile nu sunt confirmate oficial.`
 }
 
-function splitFeatures(features: Feature[]): Pick<MapData, 'hazards' | 'constructionZones'> {
-  const hazards: InfrastructureHazard[] = []
-  const constructionZones: ConstructionZone[] = []
-  for (const raw of features) {
-    const f = { ...raw, tags: raw.tags ?? {} }
-    const line = f.geometry?.type === 'LineString' ? (f.geometry.coordinates as number[][]) : null
+const M_PER_DEG_LAT = 111_320
+
+/** Pătrat cu latura 2 × `half` metri în jurul unui punct. */
+function squareAround(lat: number, lng: number, half: number): [number, number][] {
+  const dLat = half / M_PER_DEG_LAT
+  const dLng = dLat / Math.cos((lat * Math.PI) / 180)
+  return [
+    [lat - dLat, lng - dLng],
+    [lat - dLat, lng + dLng],
+    [lat + dLat, lng + dLng],
+    [lat + dLat, lng - dLng],
+  ]
+}
+
+/** Culoar de lățime 2 × `half` metri de-a lungul unui drum ([lng, lat][], ca în GeoJSON). */
+function corridor(line: number[][], half: number): [number, number][] {
+  const kx = M_PER_DEG_LAT * Math.cos((line[0][1] * Math.PI) / 180)
+  const pts = line.map(([lng, lat]) => ({ x: lng * kx, y: lat * M_PER_DEG_LAT }))
+  const left: [number, number][] = []
+  const right: [number, number][] = []
+  pts.forEach((p, i) => {
+    // Normala medie a segmentelor vecine vârfului.
+    const a = pts[Math.max(i - 1, 0)]
+    const b = pts[Math.min(i + 1, pts.length - 1)]
+    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1
+    const nx = (-(b.y - a.y) / len) * half
+    const ny = ((b.x - a.x) / len) * half
+    left.push([(p.y + ny) / M_PER_DEG_LAT, (p.x + nx) / kx])
+    right.push([(p.y - ny) / M_PER_DEG_LAT, (p.x - nx) / kx])
+  })
+  return [...left, ...right.reverse()]
+}
+
+/**
+ * Tot ce întoarce `GET /disruptions/features` devine zonă în construcție:
+ * contururile închise rămân poligoane, drumurile în lucru devin un culoar de ~20 m,
+ * iar punctele un pătrat de ~50 m.
+ */
+function featureZones(features: Feature[]): ConstructionZone[] {
+  return features.flatMap((raw) => {
+    const tags = raw.tags ?? {}
+    const line = raw.geometry?.type === 'LineString' ? (raw.geometry.coordinates as number[][]) : null
     const closed =
       line && line.length >= 4 && line[0][0] === line.at(-1)![0] && line[0][1] === line.at(-1)![1]
-    if (line && closed && f.tags.highway !== 'construction') {
-      constructionZones.push({
-        id: f.id,
-        title: featureTitle(f.tags),
-        description: featureDescription(f.tags),
-        polygon: line.map(([lng, lat]) => [lat, lng]),
-        source: OSM,
-      })
-    } else {
-      hazards.push({
-        id: f.id,
-        kind: 'roadworks' satisfies HazardKind,
-        title: featureTitle(f.tags),
-        description: featureDescription(f.tags),
-        severity: f.tags.highway === 'construction' ? 'medium' : 'low',
-        lat: f.latitude,
-        lng: f.longitude,
-        reportedAt: f.retrieved_at,
-        source: OSM,
-      })
-    }
-  }
-  return { hazards, constructionZones }
+    const polygon =
+      line && closed && tags.highway !== 'construction'
+        ? line.map(([lng, lat]) => [lat, lng] as [number, number])
+        : line && line.length >= 2
+          ? corridor(line, 10)
+          : Number.isFinite(raw.latitude) && Number.isFinite(raw.longitude)
+            ? squareAround(raw.latitude, raw.longitude, 25)
+            : null
+    if (!polygon) return []
+    return [{ id: raw.id, title: featureTitle(tags), description: featureDescription(tags), polygon, source: OSM }]
+  })
 }
 
 /** Lucrările oficiale au doar un punct; le desenăm ca pătrat de ~80 m. */
 function workZone(w: PlannedWork & { latitude: number; longitude: number }): ConstructionZone {
-  const dLat = 40 / 111_320
-  const dLng = dLat / Math.cos((w.latitude * Math.PI) / 180)
-  const { latitude: a, longitude: o } = w
   return {
     id: w.id,
     title: w.title,
     description: w.description || 'Lucrare anunțată oficial.',
-    polygon: [
-      [a - dLat, o - dLng],
-      [a - dLat, o + dLng],
-      [a + dLat, o + dLng],
-      [a + dLat, o - dLng],
-    ],
+    polygon: squareAround(w.latitude, w.longitude, 40),
     startDate: w.starts_at ?? undefined,
     endDate: w.ends_at ?? undefined,
     source: (() => {
@@ -416,6 +435,95 @@ function workZone(w: PlannedWork & { latitude: number; longitude: number }): Con
         return 'sursă oficială'
       }
     })(),
+  }
+}
+
+// ---------------------------------------------------------------- calitatea aerului
+
+type ApiReading = { value: number | null; code: number; label: string; recommendation?: string | null }
+
+type ApiAirQuality = {
+  timezone: string | null
+  current: {
+    timestamp_utc: string | null
+    pm2_5: ApiReading
+    pm10: ApiReading
+    no2: ApiReading
+    ozone: { value: number | null }
+    so2: { value: number | null }
+    european_aqi: number | null
+    rnmca: ApiReading & { pollutant: 'pm2_5' | 'pm10' | 'no2' | null }
+    alert: boolean
+  }
+  forecast_hourly: {
+    datetime_utc: string | null
+    pm2_5: number | null
+    pm10: number | null
+    no2: number | null
+    ozone: number | null
+    so2: number | null
+    european_aqi: number | null
+    aqi_pm25_code: number
+    aqi_pm25_label: string
+    aqi_code: number
+    aqi_label: string
+  }[]
+  provenance: { attribution: string; license: string; license_url: string; limitation: string }
+}
+
+const finite = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+
+const rnmcaCode = (v: unknown): RnmcaCode =>
+  typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 6 ? (v as RnmcaCode) : 0
+
+function toReading(r: ApiReading | undefined): AirReading {
+  const code = rnmcaCode(r?.code)
+  return {
+    value: finite(r?.value),
+    code,
+    label: code ? r!.label : 'Necunoscut',
+    recommendation: code ? r!.recommendation ?? null : null,
+  }
+}
+
+const POLLUTANT: Record<'pm2_5' | 'pm10' | 'no2', RnmcaPollutant> = { pm2_5: 'pm25', pm10: 'pm10', no2: 'no2' }
+
+function toAirQuality(raw: ApiAirQuality): AirQuality {
+  const c = raw.current
+  return {
+    timezone: raw.timezone || 'Europe/Bucharest',
+    updatedAt: c.timestamp_utc,
+    overall: { ...toReading(c.rnmca), pollutant: c.rnmca?.pollutant ? POLLUTANT[c.rnmca.pollutant] : null },
+    pm25: toReading(c.pm2_5),
+    pm10: toReading(c.pm10),
+    no2: toReading(c.no2),
+    o3: finite(c.ozone?.value),
+    so2: finite(c.so2?.value),
+    europeanAqi: finite(c.european_aqi),
+    alert: c.alert === true,
+    hours: (raw.forecast_hourly ?? []).flatMap((h) =>
+      h.datetime_utc && !Number.isNaN(Date.parse(h.datetime_utc))
+        ? [
+            {
+              time: h.datetime_utc,
+              pm25: finite(h.pm2_5),
+              pm10: finite(h.pm10),
+              no2: finite(h.no2),
+              o3: finite(h.ozone),
+              so2: finite(h.so2),
+              europeanAqi: finite(h.european_aqi),
+              code: rnmcaCode(h.aqi_code),
+              label: rnmcaCode(h.aqi_code) ? h.aqi_label : 'Necunoscut',
+              pm25Code: rnmcaCode(h.aqi_pm25_code),
+              pm25Label: rnmcaCode(h.aqi_pm25_code) ? h.aqi_pm25_label : 'Necunoscut',
+            },
+          ]
+        : [],
+    ),
+    source: raw.provenance.attribution,
+    license: raw.provenance.license,
+    licenseUrl: raw.provenance.license_url,
+    limitation: raw.provenance.limitation,
   }
 }
 
@@ -460,16 +568,19 @@ export const api = {
     if (all.every((r) => r.status === 'rejected')) throw (reports as PromiseRejectedResult).reason
     const items = <T>(r: PromiseSettledResult<{ items: T[] }>) => (r.status === 'fulfilled' ? r.value.items : [])
 
-    const osm = splitFeatures(items(features))
     const located = items(works).filter(
       (w): w is PlannedWork & { latitude: number; longitude: number } => w.latitude != null && w.longitude != null,
     )
     return {
       sensors: toSensors([...items(sensors), ...items(official), ...items(forecast)]),
-      hazards: osm.hazards,
-      constructionZones: [...osm.constructionZones, ...located.map(workZone)],
+      constructionZones: [...featureZones(items(features)), ...located.map(workZone)],
       issues: items(reports).filter(isOpen).map(toIssue),
     }
+  },
+
+  /** Calitatea aerului acum + prognoza orară (CAMS, 3 zile); serverul o păstrează 10 minute în cache. */
+  async getAirQuality(): Promise<AirQuality> {
+    return toAirQuality(await http<ApiAirQuality>('/air-quality'))
   },
 
   async getFeedback(id: string): Promise<IssueFeedback> {

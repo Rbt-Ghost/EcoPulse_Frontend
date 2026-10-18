@@ -13,7 +13,7 @@ import { IASI_BOUNDS, IASI_CENTER } from '../data/iasi'
 import type { LatLng, MapData, PollutionSensor, RouteResult, UserIssue } from '../types'
 import { aqiAt, aqiBand, aqiColor, polygonCenter, timeAgo } from '../utils/geo'
 import { IssuePopup } from './IssuePopup'
-import { HAZARD_ICONS, ISSUE_ICONS } from './markerMeta'
+import { ISSUE_ICONS } from './markerMeta'
 import {
   GOOGLE_MAPS_KEY,
   GOOGLE_MAPS_MAP_ID,
@@ -24,7 +24,7 @@ import {
 import { ROUTE_MODES } from './routeModes'
 
 type Selected =
-  | { kind: 'sensor' | 'hazard' | 'construction' | 'issue'; id: string }
+  | { kind: 'sensor' | 'construction' | 'issue'; id: string }
   | { kind: 'pick'; lat: number; lng: number }
 
 const [[SOUTH, WEST], [NORTH, EAST]] = IASI_BOUNDS
@@ -185,8 +185,6 @@ function GoogleMapInner(props: MapViewProps) {
     switch (selected.kind) {
       case 'sensor':
         return layers.pollution ? data.sensors.find((s) => s.id === selected.id) ?? null : null
-      case 'hazard':
-        return layers.hazards ? data.hazards.find((h) => h.id === selected.id) ?? null : null
       case 'construction':
         return layers.construction ? data.constructionZones.find((z) => z.id === selected.id) ?? null : null
       case 'issue':
@@ -302,21 +300,6 @@ function GoogleMapInner(props: MapViewProps) {
             )
           })}
 
-        {data && layers.hazards &&
-          data.hazards.map((h) => (
-            <AdvancedMarker
-              key={h.id}
-              position={h}
-              anchorPoint={AdvancedMarkerAnchorPoint.CENTER}
-              title={h.title}
-              onClick={() => setSelected({ kind: 'hazard', id: h.id })}
-            >
-              <div className={`mk-hazard sev-${h.severity}`}>
-                {createElement(HAZARD_ICONS[h.kind], { size: 15, strokeWidth: 2.4 })}
-              </div>
-            </AdvancedMarker>
-          ))}
-
         {data && layers.issues &&
           data.issues.map((iss) => {
             const mine = iss.mine
@@ -415,10 +398,10 @@ function GoogleMapInner(props: MapViewProps) {
   )
 }
 
-type Item = MapData['sensors'][number] | MapData['hazards'][number] | MapData['constructionZones'][number] | UserIssue
+type Item = MapData['sensors'][number] | MapData['constructionZones'][number] | UserIssue
 
 function SelectedContent(props: {
-  selected: 'sensor' | 'hazard' | 'construction' | 'issue'
+  selected: 'sensor' | 'construction' | 'issue'
   item: Item
   onAction: MapViewProps['onIssueAction']
 }) {
@@ -440,17 +423,6 @@ function SelectedContent(props: {
           <div><b>{s.no2 ?? '–'}</b><span>NO₂ µg/m³</span></div>
         </div>
         <div className="popup-meta">Actualizat {timeAgo(s.updatedAt)} · {s.source}</div>
-      </div>
-    )
-  }
-  if (selected === 'hazard') {
-    const h = item as MapData['hazards'][number]
-    return (
-      <div className="popup">
-        <span className={`popup-tag hazard sev-${h.severity}`}>Hazard infrastructură</span>
-        <h4>{h.title}</h4>
-        <p>{h.description}</p>
-        <div className="popup-meta">Semnalat {timeAgo(h.reportedAt)} · sursă: {h.source}</div>
       </div>
     )
   }
