@@ -42,12 +42,19 @@ Clientul e împărțit în `src/services/http.ts` (sesiune, conturi), `src/servi
 | Popup raportare: autor/vot, „s-a rezolvat” (3 → dispare), „încă există”, semnalare, închidere de autor, ascundere (admin) | `GET /reports/:id/feedback`, `POST /reports/:id/{dispute,confirm,flag,resolve}`, `POST /admin/reports/:id/hide` |
 | Căutare adrese (cu rezervă directă la Nominatim) | `GET /geocoding/search` |
 | Rute cu ora plecării și ocolirea incidentelor (când serverul are Valhalla; altfel OSRM local) | `POST /routes/alternatives` |
+| Prognoza aerului (scara RNMCA) pentru ora plecării și durata traseului | `GET /environment/air-quality` |
+| Strat **Trafic** și rute care evită drumurile aglomerate la ora plecării | `GET /traffic` |
+| **Raportează**: întrebări despre aer și trafic („Cum e aerul mâine la 17?”), răspunse din date reale | `POST /assistant/ask` |
 | Călătorii salvate: salvare, deschidere, redenumire, ștergere | `GET/POST /journeys`, `PUT/DELETE /journeys/:id` |
 | **Raportează**: textul (scris sau dictat) devine direct un issue la locația curentă, rescris de LLM | `POST /reports/from-text` |
 | **Date**: aer pe categorii de surse, meteo pe ore, stații, istoricul raportărilor cu filtre | `GET /environment/observations`, `GET /environment/weather`, `GET /environment/stations`, `GET /reports?status=&category=` |
 | **Admin** (doar rol `admin`): stare surse, rulări de sincronizare, verificarea lucrărilor oficiale | `GET /admin/data-sources/status`, `GET /admin/data-sources/runs`, `GET /admin/works/review`, `PUT /admin/works/:id` |
 
 Rolul de administrator se setează direct în baza de date a backend-ului (coloana `role` din tabelul `users`); nu există un endpoint pentru asta.
+
+În chat poți alege tipul problemei (Fum, Praf, Trafic…) și „Aleg pe hartă” pentru a pune raportarea exact unde vrei; cu un tip ales, descrierea e opțională. Mesajele care sunt întrebări (cu „?” sau „cum/care/pot…”) primesc răspuns din datele EcoPulse în loc să devină raportări.
+
+Traficul este o estimare: drumurile principale din OpenStreetMap × profilul orar al Iașului (ore de vârf, weekend), corectată de raportările „trafic” ale utilizatorilor. Cu `TOMTOM_API_KEY` în backend se folosesc și vitezele reale TomTom pentru ora curentă.
 
 Chat-ul nu pune întrebări: trimite textul și locația GPS a browserului la `POST /reports/from-text`, iar backend-ul publică imediat issue-ul (rază 500 m). Dacă în backend e configurat un LLM (`LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL`), acesta rescrie descrierea coerent și alege categoria și gravitatea; altfel se folosește o rescriere deterministă. Fără acces la GPS, utilizatorul alege locul pe hartă și confirmă cu „Adaugă aici”.
 

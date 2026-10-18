@@ -6,6 +6,7 @@ import type {
   RoutePlace,
   RouteResult,
   IssueAction,
+  TrafficSnapshot,
   UserIssue,
 } from '../types'
 
@@ -14,6 +15,8 @@ export type MapFocus = { lat: number; lng: number; zoom?: number; key: number }
 /** Props comune pentru implementările de hartă (Google Maps / Leaflet). */
 export type MapViewProps = {
   data: MapData | null
+  /** Trafic estimat la ora plecării */
+  traffic: TrafficSnapshot | null
   layers: LayerVisibility
   userPosition: LatLng
   hasGps: boolean

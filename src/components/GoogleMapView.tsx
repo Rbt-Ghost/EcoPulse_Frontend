@@ -10,8 +10,9 @@ import {
 import { Construction, Crosshair, Flag, MapPin } from 'lucide-react'
 import { createElement, Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { IASI_BOUNDS, IASI_CENTER } from '../data/iasi'
-import type { LatLng, MapData, PollutionSensor, RouteResult, UserIssue } from '../types'
+import type { LatLng, MapData, PollutionSensor, RouteResult, TrafficBand, TrafficSnapshot, UserIssue } from '../types'
 import { aqiAt, aqiBand, aqiColor, polygonCenter, timeAgo } from '../utils/geo'
+import { TRAFFIC_COLORS } from '../utils/traffic'
 import { IssuePopup } from './IssuePopup'
 import { HAZARD_ICONS, ISSUE_ICONS } from './markerMeta'
 import {
@@ -98,6 +99,34 @@ const dotIcons = (color: string): google.maps.IconSequence[] => [
 ]
 
 // ------------------------------------------------------------------ straturi
+
+/** Traficul estimat: un singur strat `google.maps.Data`, mult mai ușor decât sute de polilinii. */
+function TrafficData({ traffic }: { traffic: TrafficSnapshot }) {
+  const map = useMap()
+  useEffect(() => {
+    if (!map) return
+    const layer = new google.maps.Data({ map })
+    layer.addGeoJson({
+      type: 'FeatureCollection',
+      features: traffic.segments.map((s) => ({
+        type: 'Feature',
+        properties: { band: s.band },
+        geometry: { type: 'LineString', coordinates: s.coords.map(([lat, lng]) => [lng, lat]) },
+      })),
+    })
+    layer.setStyle((f) => {
+      const band = f.getProperty('band') as TrafficBand
+      return {
+        strokeColor: TRAFFIC_COLORS[band],
+        strokeWeight: band === 'low' ? 3 : 5,
+        strokeOpacity: band === 'low' ? 0.45 : 0.8,
+        clickable: false,
+      }
+    })
+    return () => layer.setMap(null)
+  }, [map, traffic])
+  return null
+}
 
 /** Heatmap de poluare: imagine generată pe canvas, întinsă peste Iași (netezită de browser). */
 function PollutionOverlay({ sensors }: { sensors: PollutionSensor[] }) {
@@ -234,6 +263,7 @@ function GoogleMapInner(props: MapViewProps) {
         onClick={onMapClick}
       >
         {data && layers.pollution && <PollutionOverlay sensors={data.sensors} />}
+        {props.traffic && layers.traffic && <TrafficData traffic={props.traffic} />}
 
         {data && layers.construction &&
           data.constructionZones.map((z) => {

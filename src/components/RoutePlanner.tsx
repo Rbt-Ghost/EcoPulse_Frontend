@@ -10,8 +10,9 @@ import {
   Wind,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
-import type { MapData, RouteMode, RoutePlace, RouteResult, TravelProfile } from '../types'
+import type { MapData, RouteMode, RoutePlace, RouteResult, TrafficSnapshot, TravelProfile } from '../types'
 import { aqiBand, formatDistance, formatDuration } from '../utils/geo'
+import { TRAFFIC_COLORS, TRAFFIC_LABELS, trafficBand } from '../utils/traffic'
 import { PlaceInput } from './PlaceInput'
 import { MODE_ORDER, ROUTE_MODES } from './routeModes'
 
@@ -28,6 +29,10 @@ type Props = {
   mode: RouteMode
   onModeChange: (m: RouteMode) => void
   routes: RouteResult | null
+  /** Trafic estimat la ora plecării */
+  traffic: TrafficSnapshot | null
+  /** Plecare mai târziu: traficul afișat e pentru ora plecării, nu pentru acum */
+  later: boolean
   loading: boolean
   error: string | null
   onRetry: () => void
@@ -61,12 +66,19 @@ function Insight({ routes }: { routes: RouteResult }) {
   const saved = Math.round((1 - cleanest.exposure / fastest.exposure) * 100)
   const extra = Math.max(1, Math.round((cleanest.duration - fastest.duration) / 60))
   const avoided = fastest.obstacles - cleanest.obstacles
+  const busyKm = (fastest.busyDistance - cleanest.busyDistance) / 1000
   return (
     <div className="insight">
       <Wind size={16} />
       {saved >= 1 ? (
         <span>
           Traseul curat reduce expunerea la poluare cu <b>{saved}%</b>
+          {busyKm >= 0.1 && (
+            <>
+              {' '}
+              evitând <b>{busyKm.toFixed(1).replace('.', ',')} km</b> de drumuri aglomerate
+            </>
+          )}
           {avoided > 0 && <> și ocolește <b>{avoided} {avoided === 1 ? 'obstacol' : 'obstacole'}</b></>}, pentru
           doar <b>+{extra} min</b>.
         </span>
@@ -178,6 +190,21 @@ export function RoutePlanner(props: Props) {
                     {m === 'balanced' && routes && r.id === routes.fastest.id && r.id !== routes.cleanest.id && (
                       <span className="obstacle-chip ok">identic cu traseul rapid</span>
                     )}
+                    {props.traffic && (
+                      <span
+                        className="aqi-chip"
+                        style={
+                          {
+                            '--c': r.busyDistance >= 100 ? TRAFFIC_COLORS.heavy : TRAFFIC_COLORS[trafficBand(r.traffic)],
+                          } as React.CSSProperties
+                        }
+                        title="Porțiunea traseului pe drumuri aglomerate la ora plecării"
+                      >
+                        {r.busyDistance >= 100
+                          ? `${formatDistance(r.busyDistance)} prin trafic intens`
+                          : `trafic ${TRAFFIC_LABELS[trafficBand(r.traffic)]}`}
+                      </span>
+                    )}
                     {r.obstacles > 0 ? (
                       <span className="obstacle-chip">
                         <AlertTriangle size={12} /> {r.obstacles} {r.obstacles === 1 ? 'obstacol' : 'obstacole'}
@@ -235,6 +262,16 @@ export function RoutePlanner(props: Props) {
                 </>
               )}
             </div>
+            {props.traffic && (
+              <div className="stat">
+                <span className="stat-dot" style={{ background: TRAFFIC_COLORS[props.traffic.cityBand] }} />
+                <b>{props.traffic.cityLabel}</b>
+                <small>
+                  trafic pe arterele principale
+                  {props.later && ' · la ora plecării'}
+                </small>
+              </div>
+            )}
             <div className="stat">
               <span className="stat-dot hazard" />
               <b>{data.hazards.length}</b>

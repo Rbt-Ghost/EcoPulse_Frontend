@@ -1,12 +1,16 @@
 import type {
+  AirForecast,
+  AssistantReply,
   ConstructionZone,
   HazardKind,
   InfrastructureHazard,
   IssueCategory,
   IssueFeedback,
+  LatLng,
   MapData,
   PollutionSensor,
   Severity,
+  TrafficSnapshot,
   UserIssue,
 } from '../types'
 
@@ -22,6 +26,9 @@ import type {
  *   POST /reports/:id/dispute                     alt utilizator confirmă că s-a rezolvat
  *   GET  /environment/observations                măsurători PM2.5 / PM10 / NO₂
  *   GET  /disruptions/features, /disruptions/planned   șantiere OSM și lucrări oficiale
+ *   GET  /environment/air-quality                 prognoza CAMS (scara RNMCA) pentru ora plecării
+ *   GET  /traffic                                 trafic estimat pe drumurile principale la o oră
+ *   POST /assistant/ask                           întrebări despre aer și trafic (date reale, nu raportări)
  *   POST /reports/from-text                       chat-ul de raportare: text → issue rescris de LLM
  */
 export const API_URL: string = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1').replace(/\/$/, '')
@@ -146,7 +153,7 @@ async function http<T>(path: string, init: RequestInit = {}, auth = false): Prom
 
 // ---------------------------------------------------------------- issues (reports)
 
-type ReportCategory =
+export type ReportCategory =
   | 'construction'
   | 'traffic'
   | 'smoke'
@@ -433,6 +440,38 @@ export const api = {
     }
   },
 
+  /** Prognoza calității aerului pentru intervalul călătoriei (plecare → sosire). */
+  async getAirForecast(start: Date, durationS: number, signal?: AbortSignal): Promise<AirForecast> {
+    const params = new URLSearchParams({
+      start: start.toISOString(),
+      minutes: String(Math.min(4320, Math.max(1, Math.ceil(durationS / 60)))),
+    })
+    const f = await http<{
+      available: boolean
+      status: AirForecast['status']
+      window: AirForecast['window']
+      horizon_end: string
+      index?: AirForecast['index']
+      dominant_pollutant?: AirForecast['dominant']
+      pollutants?: AirForecast['pollutants']
+      hourly?: AirForecast['hourly']
+      attribution: string
+      limitation: string
+    }>(`/environment/air-quality?${params}`, { signal })
+    return {
+      available: f.available,
+      status: f.status,
+      window: f.window,
+      horizonEnd: f.horizon_end,
+      index: f.index ?? null,
+      dominant: f.dominant_pollutant ?? null,
+      pollutants: f.pollutants ?? {},
+      hourly: f.hourly ?? [],
+      attribution: f.attribution,
+      limitation: f.limitation,
+    }
+  },
+
   async getFeedback(id: string): Promise<IssueFeedback> {
     const f = await http<{ can_vote: boolean; can_resolve: boolean; my_vote: IssueFeedback['myVote'] }>(
       `/reports/${id}/feedback`,
@@ -458,16 +497,73 @@ export const api = {
    * Publică direct un issue din textul utilizatorului; backend-ul îl rescrie coerent (LLM) și
    * alege categoria și gravitatea. Nu pune întrebări înapoi.
    */
-  async reportFromText(text: string, place: ReportPlace): Promise<TextReportReply> {
+  async reportFromText(text: string, place: ReportPlace, category?: ReportCategory | null): Promise<TextReportReply> {
     const res = await http<{ reply: string; report: ApiReport }>(
       '/reports/from-text',
       {
         method: 'POST',
-        body: JSON.stringify({ text, latitude: place.lat, longitude: place.lng, accuracy_m: place.accuracy }),
+        body: JSON.stringify({
+          text,
+          latitude: place.lat,
+          longitude: place.lng,
+          accuracy_m: place.accuracy,
+          category: category ?? undefined,
+        }),
       },
       true,
     )
     rememberOwn(res.report.id)
     return { reply: res.reply, issue: toIssue(res.report) }
+  },
+
+  /** Întrebare despre aer / trafic; răspunsul e construit din datele backend-ului. */
+  async ask(text: string, place?: LatLng | null): Promise<AssistantReply> {
+    return http<AssistantReply>('/assistant/ask', {
+      method: 'POST',
+      body: JSON.stringify({ text, latitude: place?.lat, longitude: place?.lng }),
+    })
+  },
+
+  /** Traficul estimat pe drumurile principale la ora dată (implicit acum). */
+  async getTraffic(at?: Date | null, signal?: AbortSignal): Promise<TrafficSnapshot> {
+    const query = at ? `?${new URLSearchParams({ at: at.toISOString() })}` : ''
+    const t = await http<{
+      at: string
+      city_band: TrafficSnapshot['cityBand']
+      city_label: string
+      sources: string[]
+      limitation: string
+      segments: {
+        id: string
+        name: string
+        road_class: string
+        level: number
+        band: TrafficSnapshot['cityBand']
+        label: string
+        source: TrafficSnapshot['segments'][number]['source']
+        current_speed_kmh?: number
+        free_flow_speed_kmh?: number
+        coordinates: [number, number][]
+      }[]
+    }>(`/traffic${query}`, { signal })
+    return {
+      at: t.at,
+      cityBand: t.city_band,
+      cityLabel: t.city_label,
+      sources: t.sources,
+      limitation: t.limitation,
+      segments: t.segments.map((s) => ({
+        id: s.id,
+        name: s.name,
+        roadClass: s.road_class,
+        level: s.level,
+        band: s.band,
+        label: s.label,
+        source: s.source,
+        currentSpeed: s.current_speed_kmh,
+        freeFlowSpeed: s.free_flow_speed_kmh,
+        coords: s.coordinates.map(([lng, lat]) => [lat, lng] as [number, number]),
+      })),
+    }
   },
 }

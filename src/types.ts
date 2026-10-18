@@ -116,6 +116,10 @@ export type RouteCandidate = {
   exposure: number
   /** Număr de hazard-uri / șantiere / probleme întâlnite */
   obstacles: number
+  /** Aglomerarea medie pe traseu la ora plecării (0 = liber, 1 = blocat) */
+  traffic: number
+  /** Metri parcurși pe drumuri aglomerate sau blocate */
+  busyDistance: number
 }
 
 export type RouteResult = Record<RouteMode, RouteCandidate>
@@ -131,5 +135,59 @@ export type ChatMessage = {
   pickLocation?: boolean
 }
 
-export type LayerKey = 'pollution' | 'hazards' | 'construction' | 'issues'
+export type LayerKey = 'pollution' | 'traffic' | 'hazards' | 'construction' | 'issues'
 export type LayerVisibility = Record<LayerKey, boolean>
+
+/** Indicele RNMCA (1 = Bun … 6 = Extrem de rău), din legislația românească. */
+export type RnmcaLevel = { code: 1 | 2 | 3 | 4 | 5 | 6; label: string; recommendation: string }
+
+export type ForecastPollutant = 'pm25' | 'pm10' | 'no2' | 'o3' | 'so2' | 'european_aqi'
+
+export type AirForecastHour = { time: string; index: RnmcaLevel | null } & Partial<
+  Record<ForecastPollutant, number | null>
+>
+
+/** Prognoza CAMS pentru fereastra călătoriei (`GET /environment/air-quality`). */
+export type AirForecast = {
+  available: boolean
+  status: 'cached' | 'live' | 'unavailable' | 'beyond_forecast_horizon'
+  window: { start: string; end: string }
+  horizonEnd: string
+  index: RnmcaLevel | null
+  dominant: ForecastPollutant | null
+  pollutants: Partial<Record<ForecastPollutant, { max: number; mean: number; unit: string; index?: RnmcaLevel }>>
+  hourly: AirForecastHour[]
+  attribution: string
+  limitation: string
+}
+
+export type TrafficBand = 'low' | 'moderate' | 'heavy' | 'severe'
+
+/** Un drum principal cu aglomerarea estimată la ora cerută (`GET /traffic`). */
+export type TrafficSegment = {
+  id: string
+  name: string
+  roadClass: string
+  /** 0 = liber … 1 = blocat */
+  level: number
+  band: TrafficBand
+  label: string
+  source: 'profile' | 'profile_calibrated' | 'community_report' | 'tomtom'
+  /** Viteze TomTom (doar pentru `source: 'tomtom'`) */
+  currentSpeed?: number
+  freeFlowSpeed?: number
+  /** [lat, lng][] */
+  coords: [number, number][]
+}
+
+export type TrafficSnapshot = {
+  at: string
+  cityBand: TrafficBand
+  cityLabel: string
+  sources: string[]
+  segments: TrafficSegment[]
+  limitation: string
+}
+
+/** Răspunsul asistentului: `report` înseamnă că mesajul nu e o întrebare și trebuie publicat. */
+export type AssistantReply = { kind: 'answer'; reply: string } | { kind: 'report' }

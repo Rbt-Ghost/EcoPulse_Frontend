@@ -2,6 +2,7 @@ import { Bot, LocateFixed, Map as MapIcon, MapPin, Mic, MicOff, SendHorizontal, 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { GeoStatus } from '../hooks/useGeolocation'
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition'
+import type { ReportCategory } from '../services/api'
 import type { ChatMessage, UserIssue } from '../types'
 import { ISSUE_ICONS, ISSUE_LABELS, SEVERITY_LABELS } from './markerMeta'
 
@@ -15,7 +16,30 @@ type Props = {
   /** Reia alegerea locului pe hartă pentru raportarea fără GPS */
   onPickOnMap: () => void
   onShowIssue: (issue: UserIssue) => void
+  /** Tipul ales manual; `null` = îl deduce asistentul din text */
+  category: ReportCategory | null
+  onCategoryChange: (c: ReportCategory | null) => void
+  /** Unde se pune raportarea: la locația GPS sau într-un loc ales pe hartă */
+  placeMode: PlaceMode
+  onPlaceModeChange: (m: PlaceMode) => void
+  /** Locul raportării e deja marcat pe hartă */
+  placeMarked: boolean
 }
+
+export type PlaceMode = 'gps' | 'map'
+
+/** Tipurile pe care le poate alege utilizatorul; textul implicit e folosit când nu scrie nimic. */
+const REPORT_TYPES: { id: ReportCategory; label: string; text: string }[] = [
+  { id: 'smoke', label: 'Fum', text: 'Fum în zonă.' },
+  { id: 'dust', label: 'Praf', text: 'Praf în suspensie în zonă.' },
+  { id: 'industrial', label: 'Miros / industrial', text: 'Miros puternic sau poluare industrială în zonă.' },
+  { id: 'traffic', label: 'Trafic', text: 'Trafic foarte aglomerat în zonă.' },
+  { id: 'infrastructure', label: 'Groapă / trotuar', text: 'Problemă de infrastructură pe drum sau trotuar.' },
+  { id: 'flooding', label: 'Inundație', text: 'Zonă inundată.' },
+  { id: 'other', label: 'Altceva', text: 'Problemă semnalată în zonă.' },
+]
+
+const QUESTIONS = ['Cum e aerul acum?', 'Pot să alerg mâine la 7 dimineața?', 'Cum e traficul diseară?']
 
 const SUGGESTIONS = [
   'groapa mare pe carosabil, periculoasa pt biciclisti',
@@ -69,7 +93,8 @@ export function IssueChat(props: Props) {
   }, [text])
 
   const send = (value = text) => {
-    const v = value.trim()
+    // Cu un tip ales, raportarea se poate trimite și fără descriere.
+    const v = value.trim() || REPORT_TYPES.find((t) => t.id === props.category)?.text || ''
     if (!v || props.sending) return
     if (speech.listening) speech.stop()
     props.onSend(v)
@@ -85,7 +110,11 @@ export function IssueChat(props: Props) {
   }
 
   const geoLabel =
-    props.geoStatus === 'gps'
+    props.placeMode === 'map'
+      ? props.placeMarked
+        ? 'Loc marcat pe hartă ✓'
+        : 'Apasă pe hartă locul problemei'
+      : props.geoStatus === 'gps'
       ? `Locație GPS${props.accuracy ? ` · ±${Math.round(props.accuracy)} m` : ''}`
       : props.geoStatus === 'pending'
         ? 'Se determină locația…'
@@ -97,8 +126,11 @@ export function IssueChat(props: Props) {
     <div className="chat">
       <header className="panel-header chat-header">
         <div>
-          <h1>Raportează o problemă</h1>
-          <p>Descrie ce ai observat. O adăugăm pe hartă la locația ta, cu o rază de 500 m – fără alte întrebări.</p>
+          <h1>Raportează sau întreabă</h1>
+          <p>
+            Descrie ce ai observat și o adăugăm pe hartă (rază 500 m), sau întreabă-mă cum e aerul ori traficul –
+            acum sau la o oră anume.
+          </p>
         </div>
         <button
           className={`geo-pill ${props.geoStatus}`}
@@ -141,7 +173,15 @@ export function IssueChat(props: Props) {
         {onlyWelcome && (
           <div className="suggestions">
             <span>
-              <Sparkles size={14} /> Încearcă:
+              <Sparkles size={14} /> Întreabă:
+            </span>
+            {QUESTIONS.map((s) => (
+              <button key={s} className="chip" onClick={() => send(s)}>
+                {s}
+              </button>
+            ))}
+            <span>
+              <Sparkles size={14} /> Sau raportează:
             </span>
             {SUGGESTIONS.map((s) => (
               <button key={s} className="chip" onClick={() => send(s)}>
@@ -153,6 +193,49 @@ export function IssueChat(props: Props) {
       </div>
 
       {speech.error && <div className="chat-error">{speech.error}</div>}
+
+      <div className="report-options">
+        <div className="chip-row" role="radiogroup" aria-label="Tipul problemei">
+          <button
+            role="radio"
+            aria-checked={!props.category}
+            className={`chip${!props.category ? ' on' : ''}`}
+            onClick={() => props.onCategoryChange(null)}
+          >
+            Automat
+          </button>
+          {REPORT_TYPES.map((t) => (
+            <button
+              key={t.id}
+              role="radio"
+              aria-checked={props.category === t.id}
+              className={`chip${props.category === t.id ? ' on' : ''}`}
+              onClick={() => props.onCategoryChange(props.category === t.id ? null : t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <div className="segmented two" role="radiogroup" aria-label="Unde este problema">
+          <button
+            role="radio"
+            aria-checked={props.placeMode === 'gps'}
+            className={props.placeMode === 'gps' ? 'active' : ''}
+            onClick={() => props.onPlaceModeChange('gps')}
+          >
+            <LocateFixed size={15} /> Locația mea
+          </button>
+          <button
+            role="radio"
+            aria-checked={props.placeMode === 'map'}
+            className={props.placeMode === 'map' ? 'active' : ''}
+            // Apăsat din nou (ex. după „Continuă în chat”), redeschide harta pentru a muta locul.
+            onClick={() => props.onPlaceModeChange('map')}
+          >
+            <MapPin size={15} /> Aleg pe hartă
+          </button>
+        </div>
+      </div>
 
       <form
         className={`composer${speech.listening ? ' listening' : ''}`}
@@ -176,8 +259,14 @@ export function IssueChat(props: Props) {
           ref={inputRef}
           rows={1}
           value={text}
-          placeholder={speech.listening ? 'Te ascult… vorbește acum' : 'Ex: groapă mare pe Bd. Independenței…'}
-          aria-label="Descrierea problemei"
+          placeholder={
+            speech.listening
+              ? 'Te ascult… vorbește acum'
+              : props.category
+                ? 'Detalii (opțional)…'
+                : 'Descrie problema sau întreabă „Cum e aerul mâine?”'
+          }
+          aria-label="Mesaj: descrierea problemei sau o întrebare"
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -186,7 +275,12 @@ export function IssueChat(props: Props) {
             }
           }}
         />
-        <button type="submit" className="icon-btn send" disabled={!text.trim() || props.sending} aria-label="Trimite">
+        <button
+          type="submit"
+          className="icon-btn send"
+          disabled={(!text.trim() && !props.category) || props.sending}
+          aria-label="Trimite"
+        >
           <SendHorizontal size={18} />
         </button>
       </form>

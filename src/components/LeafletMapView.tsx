@@ -15,8 +15,9 @@ import {
   useMapEvents,
 } from 'react-leaflet'
 import { IASI_BOUNDS, IASI_CENTER } from '../data/iasi'
-import type { LatLng, MapData, RouteResult } from '../types'
+import type { LatLng, MapData, RouteResult, TrafficSnapshot } from '../types'
 import { aqiAt, aqiBand, aqiColor, polygonCenter, timeAgo } from '../utils/geo'
+import { TRAFFIC_COLORS } from '../utils/traffic'
 import { IssuePopup } from './IssuePopup'
 import {
   constructionIcon,
@@ -66,6 +67,28 @@ function PollutionGrid({ data }: { data: MapData }) {
           pathOptions={{ stroke: false, fillColor: cell.color, fillOpacity: 0.26 }}
           renderer={renderer}
           interactive={false}
+        />
+      ))}
+    </>
+  )
+}
+
+/** Liniile de trafic nu sunt interactive: un clic pe drum trebuie să ajungă la hartă (alegerea punctelor). */
+function TrafficLayer({ traffic }: { traffic: TrafficSnapshot }) {
+  return (
+    <>
+      {traffic.segments.map((s) => (
+        <Polyline
+          key={s.id}
+          positions={s.coords}
+          renderer={renderer}
+          interactive={false}
+          pathOptions={{
+            color: TRAFFIC_COLORS[s.band],
+            weight: s.band === 'low' ? 3 : 5,
+            opacity: s.band === 'low' ? 0.45 : 0.8,
+            lineCap: 'round',
+          }}
         />
       ))}
     </>
@@ -188,6 +211,7 @@ export default function LeafletMapView(props: MapViewProps) {
       <LocateButton position={props.userPosition} hasGps={props.hasGps} />
 
       {data && layers.pollution && <PollutionGrid data={data} />}
+      {props.traffic && layers.traffic && <TrafficLayer traffic={props.traffic} />}
 
       {data && layers.construction &&
         data.constructionZones.map((z) => {

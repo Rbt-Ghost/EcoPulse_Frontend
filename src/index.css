@@ -833,6 +833,9 @@ p {
 .layer-chip.pollution {
   --c: #16a34a;
 }
+.layer-chip.traffic {
+  --c: #ea580c;
+}
 .layer-chip.hazard {
   --c: #dc2626;
 }
@@ -936,6 +939,17 @@ p {
   width: 16px;
   height: 16px;
   flex-shrink: 0;
+}
+
+.lg-traffic {
+  height: 5px;
+  border-radius: 3px;
+}
+
+.traffic-legend {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 6px;
 }
 
 .lg-hazard {
@@ -1640,6 +1654,31 @@ p {
 
 .app.placing .map-wrap {
   cursor: crosshair;
+}
+
+.report-options {
+  margin: 0 14px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.report-options .chip-row {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.report-options .chip-row .chip {
+  flex-shrink: 0;
+  padding: 5px 10px;
+  font-size: 12.5px;
+}
+
+.report-options .segmented button {
+  padding: 7px 6px;
+  font-size: 12.5px;
 }
 
 .chat-error {
@@ -2472,6 +2511,95 @@ p {
 
 .route-details p {
   margin: 0;
+}
+
+/* prognoza calității aerului (RNMCA) */
+
+.forecast-card {
+  border-left: 4px solid var(--c, var(--border-strong));
+}
+
+.forecast-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.forecast-head .aqi-chip {
+  flex-shrink: 0;
+}
+
+.forecast-advice {
+  color: var(--text-2);
+}
+
+.forecast-values {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin: 2px 0 0;
+}
+
+.forecast-values div {
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.forecast-values div.dominant {
+  background: color-mix(in srgb, var(--c) 14%, white);
+}
+
+.forecast-values dt {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+
+.forecast-values dd {
+  margin: 0;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.forecast-values dd small {
+  font-weight: 500;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+.forecast-hours {
+  display: flex;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+}
+
+.forecast-hours li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 30px;
+}
+
+.forecast-hours li span {
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--c);
+}
+
+.forecast-hours li small {
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+.forecast-card .footnote {
+  margin-top: 2px;
 }
 
 .warn-list {

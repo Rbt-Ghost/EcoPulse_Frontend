@@ -1,10 +1,12 @@
-import { ChevronDown, Construction, Layers, MessageSquareWarning, TriangleAlert, Wind } from 'lucide-react'
+import { CarFront, ChevronDown, Construction, Layers, MessageSquareWarning, TriangleAlert, Wind } from 'lucide-react'
 import { useState } from 'react'
 import type { LayerKey, LayerVisibility } from '../types'
 import { AQI_BANDS } from '../utils/geo'
+import { TRAFFIC_COLORS, TRAFFIC_LABELS } from '../utils/traffic'
 
 const LAYERS: { key: LayerKey; label: string; icon: typeof Wind; cls: string }[] = [
   { key: 'pollution', label: 'Poluare', icon: Wind, cls: 'pollution' },
+  { key: 'traffic', label: 'Trafic', icon: CarFront, cls: 'traffic' },
   { key: 'hazards', label: 'Hazard-uri', icon: TriangleAlert, cls: 'hazard' },
   { key: 'construction', label: 'Șantiere', icon: Construction, cls: 'construction' },
   { key: 'issues', label: 'Raportări', icon: MessageSquareWarning, cls: 'issue' },
@@ -61,6 +63,16 @@ export function MapOverlay({ layers, onToggle, loading }: Props) {
                 <span>Bun</span>
                 <span>Periculos</span>
               </div>
+            </div>
+            <div className="legend-section">
+              <span className="legend-label">Trafic estimat la ora plecării</span>
+              <ul className="legend-items traffic-legend">
+                {(Object.keys(TRAFFIC_COLORS) as (keyof typeof TRAFFIC_COLORS)[]).map((b) => (
+                  <li key={b}>
+                    <span className="lg lg-traffic" style={{ background: TRAFFIC_COLORS[b] }} /> {TRAFFIC_LABELS[b]}
+                  </li>
+                ))}
+              </ul>
             </div>
             <ul className="legend-items">
               <li><span className="lg lg-hazard" /> Hazard infrastructură</li>

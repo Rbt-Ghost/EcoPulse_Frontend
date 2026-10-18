@@ -1,15 +1,17 @@
 import { Check, ChevronUp, MapPin } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
-import { IssueChat } from './components/IssueChat'
+import { IssueChat, type PlaceMode } from './components/IssueChat'
 import { MapOverlay } from './components/MapOverlay'
 import { GOOGLE_MAPS_KEY, type MapFocus } from './components/mapTypes'
 import { NavRail, type Tab } from './components/NavRail'
 import { RoutePlanner } from './components/RoutePlanner'
+import { AirForecastCard, DeparturePicker } from './components/TripForecast'
 import { useGeolocation } from './hooks/useGeolocation'
-import { api, API_URL, ApiError, type ReportPlace } from './services/api'
+import { api, API_URL, ApiError, type ReportCategory, type ReportPlace } from './services/api'
 import { reverseGeocode } from './services/geocoding'
 import { computeRoutes, openInGoogleMaps } from './services/routing'
 import type {
+  AirForecast,
   ChatMessage,
   IssueAction,
   LatLng,
@@ -19,6 +21,7 @@ import type {
   RouteMode,
   RoutePlace,
   RouteResult,
+  TrafficSnapshot,
   TravelProfile,
   UserIssue,
 } from './types'
@@ -31,7 +34,7 @@ const MapView = lazy(() =>
 const WELCOME: ChatMessage = {
   id: 'welcome',
   role: 'assistant',
-  text: 'Salut! Sunt asistentul EcoPulse. Descrie-mi (în scris sau vocal) ce problemă ai observat – o groapă, o zonă inundată, fum, un șantier – și o adaug imediat pe hartă, la locația ta curentă.',
+  text: 'Salut! Sunt asistentul EcoPulse. Descrie-mi (în scris sau vocal) ce problemă ai observat – o groapă, fum, trafic, un șantier – și o adaug pe hartă, la locația ta sau într-un loc ales de tine. Mă poți întreba și cum e aerul ori traficul, acum sau mai târziu.',
   createdAt: new Date().toISOString(),
 }
 
@@ -44,6 +47,7 @@ export default function App() {
   const [data, setData] = useState<MapData | null>(null)
   const [layers, setLayers] = useState<LayerVisibility>({
     pollution: true,
+    traffic: true,
     hazards: true,
     construction: true,
     issues: true,
@@ -57,12 +61,25 @@ export default function App() {
   const [routeLoading, setRouteLoading] = useState(false)
   const [routeError, setRouteError] = useState<string | null>(null)
   const routeAbort = useRef<AbortController | null>(null)
+  /** `null` = plecare acum */
+  const [departure, setDeparture] = useState<Date | null>(null)
+  const [forecast, setForecast] = useState<{ key: string; value: AirForecast } | null>(null)
+  const [traffic, setTraffic] = useState<TrafficSnapshot | null>(null)
+  const trafficRef = useRef<TrafficSnapshot | null>(null)
+  /** Ultima cerere de rute, refăcută când se schimbă traficul (altă oră de plecare) */
+  const lastRoute = useRef<{ f: RoutePlace | null; t: RoutePlace | null; p: TravelProfile } | null>(null)
 
   const [messages, setMessages] = useState<ChatMessage[]>([WELCOME])
   const [sending, setSending] = useState(false)
   const [freshIssueId, setFreshIssueId] = useState<string | null>(null)
   /** Raportare trimisă fără GPS, care așteaptă locul ales pe hartă */
-  const [awaitingPlace, setAwaitingPlace] = useState<{ text: string; messageId: string } | null>(null)
+  const [awaitingPlace, setAwaitingPlace] = useState<{
+    text: string
+    messageId: string
+    category: ReportCategory | null
+  } | null>(null)
+  const [reportCategory, setReportCategory] = useState<ReportCategory | null>(null)
+  const [placeMode, setPlaceMode] = useState<PlaceMode>('gps')
   const [picking, setPicking] = useState(false)
   const [draftPin, setDraftPin] = useState<LatLng | null>(null)
 
@@ -101,6 +118,7 @@ export default function App() {
   const requestRoutes = useCallback(
     async (f: RoutePlace | null, t: RoutePlace | null, p: TravelProfile) => {
       routeAbort.current?.abort()
+      lastRoute.current = { f, t, p }
       setRouteError(null)
       if (!f || !t) {
         setRoutes(null)
@@ -112,7 +130,7 @@ export default function App() {
       routeAbort.current = ctrl
       setRouteLoading(true)
       try {
-        const result = await computeRoutes(f, t, p, snapshot, ctrl.signal)
+        const result = await computeRoutes(f, t, p, snapshot, trafficRef.current?.segments ?? [], ctrl.signal)
         if (!ctrl.signal.aborted) setRoutes(result)
       } catch (e) {
         if (ctrl.signal.aborted) return
@@ -124,6 +142,64 @@ export default function App() {
     },
     [],
   )
+
+  // ------------------------------------------------------------ trafic la ora plecării
+  useEffect(() => {
+    const ctrl = new AbortController()
+    const load = () =>
+      api
+        .getTraffic(departure, ctrl.signal)
+        .then((t) => {
+          trafficRef.current = t
+          setTraffic(t)
+          // Rutele depind de trafic: le recalculăm pentru noua oră.
+          const last = lastRoute.current
+          if (last?.f && last.t) requestRoutes(last.f, last.t, last.p)
+        })
+        .catch(() => {
+          /* fără date de trafic: rutele se calculează doar după poluare și obstacole */
+        })
+    load()
+    // „Acum” se schimbă în timp: reîmprospătăm la 10 minute.
+    const timer = departure ? undefined : setInterval(load, 600000)
+    return () => {
+      ctrl.abort()
+      clearInterval(timer)
+    }
+  }, [departure, requestRoutes])
+
+  // ------------------------------------------------------------ prognoză aer (CAMS / RNMCA)
+  const selected = routes?.[mode] ?? null
+  const forecastKey = selected ? `${selected.id}:${Math.round(selected.duration)}:${departure?.getTime() ?? 'now'}` : null
+  useEffect(() => {
+    if (!forecastKey || !selected) return
+    const ctrl = new AbortController()
+    const start = departure ?? new Date()
+    api
+      .getAirForecast(start, selected.duration, ctrl.signal)
+      .then((value) => setForecast({ key: forecastKey, value }))
+      .catch(() => {
+        if (ctrl.signal.aborted) return
+        const end = new Date(start.getTime() + selected.duration * 1000).toISOString()
+        setForecast({
+          key: forecastKey,
+          value: {
+            available: false,
+            status: 'unavailable',
+            window: { start: start.toISOString(), end },
+            horizonEnd: end,
+            index: null,
+            dominant: null,
+            pollutants: {},
+            hourly: [],
+            attribution: '',
+            limitation: '',
+          },
+        })
+      })
+    return () => ctrl.abort()
+  }, [forecastKey, selected, departure])
+  const forecastLoading = forecastKey !== null && forecast?.key !== forecastKey
 
   const updateFrom = (p: RoutePlace | null) => {
     setFrom(p)
@@ -213,10 +289,10 @@ export default function App() {
     setMessages((m) => m.map((x) => (x.id === id ? { ...x, ...patch } : x)))
 
   /** Publică raportarea la locul dat; răspunsul înlocuiește mesajul „pending” cu id-ul dat. */
-  const publish = async (text: string, place: ReportPlace, pendingId: string) => {
+  const publish = async (text: string, place: ReportPlace, pendingId: string, category: ReportCategory | null) => {
     setSending(true)
     try {
-      const { reply, issue } = await api.reportFromText(text, place)
+      const { reply, issue } = await api.reportFromText(text, place, category)
       patchMessage(pendingId, { text: reply, issue, pending: false })
       setData((d) => (d ? { ...d, issues: [...d.issues.filter((i) => i.id !== issue.id), issue] } : d))
       setFreshIssueId(issue.id)
@@ -243,26 +319,53 @@ export default function App() {
       { id: crypto.randomUUID(), role: 'user', text, createdAt: new Date().toISOString() },
       { id: pendingId, role: 'assistant', text: '', createdAt: new Date().toISOString(), pending: true },
     ])
+    const category = reportCategory
     setSending(true)
-    const fix = await geo.freshFix()
-    setSending(false)
-    if (fix) {
-      await publish(text, fix, pendingId)
+    // Fără tip ales, mesajul poate fi o întrebare despre aer / trafic: răspunde asistentul.
+    if (!category) {
+      try {
+        const answer = await api.ask(text, geo.status === 'gps' ? geo.position : null)
+        if (answer.kind === 'answer') {
+          patchMessage(pendingId, { pending: false, text: answer.reply })
+          setSending(false)
+          return
+        }
+      } catch {
+        /* asistent indisponibil: tratăm mesajul ca raportare */
+      }
+    }
+    // Locul a fost marcat pe hartă înainte de trimitere: publicăm direct acolo.
+    if (placeMode === 'map' && draftPin) {
+      const place = draftPin
+      setDraftPin(null)
+      setPicking(false)
+      setSending(false)
+      await publish(text, place, pendingId, category)
       return
     }
-    // Fără GPS: utilizatorul alege locul pe hartă.
+    const fix = placeMode === 'gps' ? await geo.freshFix() : null
+    setSending(false)
+    if (fix) {
+      await publish(text, fix, pendingId, category)
+      return
+    }
+    // Loc ales manual (sau fără GPS): utilizatorul apasă pe hartă locul problemei.
     patchMessage(pendingId, {
       pending: false,
       pickLocation: true,
-      text: 'Nu am acces la locația ta. Apasă pe hartă locul unde se află problema și confirmă, iar eu o adaug imediat.',
+      text:
+        placeMode === 'map'
+          ? 'Apasă pe hartă locul exact al problemei și confirmă cu „Adaugă aici”.'
+          : 'Nu am acces la locația ta. Apasă pe hartă locul unde se află problema și confirmă, iar eu o adaug imediat.',
     })
-    setAwaitingPlace({ text, messageId: pendingId })
+    setAwaitingPlace({ text, messageId: pendingId, category })
     setPicking(true)
+    if (window.innerWidth < 860) setSheetOpen(false)
   }
 
   const confirmPlace = async () => {
     if (!awaitingPlace || !draftPin) return
-    const { text, messageId } = awaitingPlace
+    const { text, messageId, category } = awaitingPlace
     const place = draftPin
     const pendingId = crypto.randomUUID()
     patchMessage(messageId, { pickLocation: false })
@@ -274,12 +377,26 @@ export default function App() {
     setAwaitingPlace(null)
     setPicking(false)
     setDraftPin(null)
-    await publish(text, place, pendingId)
+    await publish(text, place, pendingId, category)
   }
 
   const cancelPicking = () => {
     setPicking(false)
     setDraftPin(null)
+    if (awaitingPlace) {
+      patchMessage(awaitingPlace.messageId, { pickLocation: false })
+      setAwaitingPlace(null)
+    }
+  }
+
+  /** „Aleg pe hartă” deschide imediat harta (pe mobil) și acceptă clicul pentru loc. */
+  const changePlaceMode = (m: PlaceMode) => {
+    setPlaceMode(m)
+    if (m === 'map') setPicking(true)
+    else if (!awaitingPlace) {
+      setPicking(false)
+      setDraftPin(null)
+    }
   }
 
   const toggleLayer = (key: LayerKey) => setLayers((l) => ({ ...l, [key]: !l[key] }))
@@ -289,6 +406,8 @@ export default function App() {
   }
 
   const placing = picking && tab === 'report'
+  /** Clicul pe hartă alege locul raportării: după „Aleg pe hartă” sau când o raportare așteaptă locul. */
+  const choosingPlace = tab === 'report' && (picking || placeMode === 'map')
 
   return (
     <div className={`app tab-${tab}${sheetOpen ? ' sheet-open' : ''}${placing ? ' placing' : ''}`}>
@@ -315,10 +434,20 @@ export default function App() {
             mode={mode}
             onModeChange={setMode}
             routes={routes}
+            traffic={traffic}
+            later={!!departure}
             loading={routeLoading}
             error={routeError}
             onRetry={() => requestRoutes(from, to, profile)}
             onExport={exportRoute}
+            options={<DeparturePicker value={departure} onChange={setDeparture} />}
+            details={
+              <AirForecastCard
+                forecast={forecast?.key === forecastKey ? forecast.value : null}
+                loading={forecastLoading}
+                future={!!departure}
+              />
+            }
           />
         ) : (
           <IssueChat
@@ -330,6 +459,11 @@ export default function App() {
             onSend={sendMessage}
             onPickOnMap={() => setPicking(true)}
             onShowIssue={showIssue}
+            category={reportCategory}
+            onCategoryChange={setReportCategory}
+            placeMode={placeMode}
+            onPlaceModeChange={changePlaceMode}
+            placeMarked={!!draftPin}
           />
         )}
       </aside>
@@ -338,6 +472,7 @@ export default function App() {
         <Suspense fallback={<div className="map" />}>
           <MapView
             data={data}
+            traffic={traffic}
             layers={layers}
             userPosition={geo.position}
             hasGps={geo.status === 'gps'}
@@ -347,29 +482,46 @@ export default function App() {
             mode={mode}
             onModeChange={setMode}
             onPickPoint={tab === 'map' ? pickPoint : null}
-            onPlacePick={placing ? setDraftPin : null}
-            draftPin={placing ? draftPin : null}
+            onPlacePick={choosingPlace ? setDraftPin : null}
+            draftPin={choosingPlace ? draftPin : null}
             focus={focus}
             freshIssueId={freshIssueId}
             onIssueAction={issueAction}
           />
         </Suspense>
         <MapOverlay layers={layers} onToggle={toggleLayer} loading={!data} />
-        {placing && (
+        {choosingPlace && (
           <div className="place-banner" role="dialog" aria-label="Alege locul problemei">
             <MapPin size={18} />
             <span>
-              {draftPin
-                ? 'Locul a fost marcat. Îl poți muta apăsând din nou pe hartă.'
-                : 'Apasă pe hartă locul unde se află problema.'}
+              {!draftPin
+                ? 'Apasă pe hartă locul unde se află problema.'
+                : awaitingPlace
+                  ? 'Locul a fost marcat. Îl poți muta apăsând din nou pe hartă.'
+                  : 'Locul a fost marcat (îl poți muta). Acum scrie sau alege tipul problemei în chat și trimite.'}
             </span>
             <div className="place-banner-actions">
-              <button className="btn btn-sm btn-soft" onClick={cancelPicking}>
+              <button
+                className="btn btn-sm btn-soft"
+                onClick={() => {
+                  cancelPicking()
+                  changePlaceMode('gps')
+                }}
+              >
                 Anulează
               </button>
-              <button className="btn btn-sm btn-primary" disabled={!draftPin || sending} onClick={confirmPlace}>
-                <Check size={15} /> Adaugă aici
-              </button>
+              {awaitingPlace ? (
+                <button className="btn btn-sm btn-primary" disabled={!draftPin || sending} onClick={confirmPlace}>
+                  <Check size={15} /> Adaugă aici
+                </button>
+              ) : (
+                picking && (
+                  // Pe mobil harta acoperă chat-ul: revenim la el ca să scriem raportarea.
+                  <button className="btn btn-sm btn-primary" disabled={!draftPin} onClick={() => setPicking(false)}>
+                    <Check size={15} /> Continuă în chat
+                  </button>
+                )
+              )}
             </div>
           </div>
         )}
